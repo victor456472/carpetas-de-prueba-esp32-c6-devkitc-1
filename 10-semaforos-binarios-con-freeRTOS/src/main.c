@@ -54,9 +54,6 @@ la llave y luego TaskG la recibe permitiendo asi que se ejecute la tarea.
                                             |-->|  Run process   |
                                                 |________________|
 
-
-
-
 */
 
 #include <stdio.h>
