@@ -11,7 +11,6 @@ sin embargo, para el caso del esp32-c6-DevKitC-1 habia que actualizar algunos me
 que quedaron obsoletos desde la fecha de la publicación. algunos de ellos son los
 pertenencientes a esp_event_loop.h que ahora migraron a esp_event.h
 
-Es necesario documentar el codigo desarrollado para su commprensión
 */
 
 #include "freertos/FreeRTOS.h"
@@ -196,9 +195,21 @@ void wifi_scan(void) {
 
     ESP_ERROR_CHECK(esp_wifi_scan_start(&scan_config, true)); // Iniciar el escaneo
 
+    /*
+    se inicializa una variable "ap_num" que almacenará el numero de redes wifi escaneadas.
+    además se crea un vector de 20 posiciones que guardará los datos de las redes escaneadas.
+    */
     uint16_t ap_num = 20; // Máximo número de puntos de acceso a listar
     wifi_ap_record_t ap_records[20];
+
+    /*
+    El comando esp_wifi_scan_get_ap_records() devuelve el numero de redes y la informacion
+    de cada una en un puntero hacia las variables que se le pasan como parametro.
+    */
+
     ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&ap_num, ap_records)); // Obtener resultados
+
+    //Se imprimen las redes WiFi existentes:
 
     ESP_LOGI("WiFi Scan", "Número de AP encontrados: %d", ap_num);
     ESP_LOGI("WiFi Scan", "SSID | CHANNEL | RSSI | MAC");
@@ -215,14 +226,19 @@ void wifi_scan(void) {
 }
 
 void app_main(void) {
+    // Se inicializa la memoria flash
     ESP_ERROR_CHECK(nvs_flash_init());
+
+    // Se inicializa la conexion wifi
     wifi_init();
 
+    // Se configura el ESP en modo estación y se empieza a usar el ESP en modo estacion:
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA)); // Configura en modo estación
-    ESP_ERROR_CHECK(esp_wifi_start());
+    ESP_ERROR_CHECK(esp_wifi_start()); //empieza el modo estación
 
     while (true) {
         ESP_LOGI("WiFi Scan", "Iniciando escaneo de redes WiFi...");
+        //inicia el escaneo de redes y las imprime en el monitor serial
         wifi_scan();
         vTaskDelay(pdMS_TO_TICKS(10000)); // Espera 10 segundos entre escaneos
     }
