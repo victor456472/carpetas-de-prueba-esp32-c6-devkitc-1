@@ -15,10 +15,14 @@
 
 // Se definen las credenciales de conexion a la red:
 #define EXAMPLE_ESP_WIFI_SSID "SSID"
-#define EXAMPLE_ESP_WIFI_PASS "CONTRASEÑA WIFI"
+#define EXAMPLE_ESP_WIFI_PASS "contraseña WI-FI"
 
 //etiqueta para los logs
 static const char *TAG = "WIFI_STATION";
+
+// Variables globales para guardar el estado de conexión e IP
+static bool s_connected = false;              // indica si tenemos IP
+static esp_ip4_addr_t s_ip_addr;             // guardará la dirección IP
 
 /**
  * event_handler
@@ -40,12 +44,15 @@ static void event_handler(void* arg, esp_event_base_t event_base,
     //    del AP (Access Point) o falla la conexión.
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {  
         ESP_LOGI(TAG, "Conexión perdida. Reintentando...");
+        s_connected = false;
         // Intentamos reconectarnos automáticamente.
         esp_wifi_connect();
     // 3. IP_EVENT_STA_GOT_IP: Se dispara cuando finalmente se obtiene IP del router.
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         // "event_data" contiene información acerca de la IP obtenida.
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
+        s_ip_addr = event->ip_info.ip; // Guardamos la IP
+        s_connected = true;            // marcamos como conectado
         ESP_LOGI(TAG, "Conectado, IP: " IPSTR, IP2STR(&event->ip_info.ip));
     }
 }
@@ -130,4 +137,15 @@ void app_main(void) {
 
     // 3. Llamamos a la función que configura e inicia la Wi-Fi Station
     wifi_init_sta();
+
+    while (true) {
+        // Si estamos conectados, imprimimos la IP
+        if (s_connected) {
+            ESP_LOGI(TAG, "IP actual: " IPSTR, IP2STR(&s_ip_addr));
+        } else {
+            ESP_LOGI(TAG, "No conectado todavía...");
+        }
+        // Espera 1 segundo antes de repetir
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
 }
