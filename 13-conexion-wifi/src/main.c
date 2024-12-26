@@ -14,8 +14,8 @@
 #include "esp_err.h"
 
 // Se definen las credenciales de conexion a la red:
-#define EXAMPLE_ESP_WIFI_SSID "JOptionPane"
-#define EXAMPLE_ESP_WIFI_PASS "System.out.println"
+#define EXAMPLE_ESP_WIFI_SSID "SSID"
+#define EXAMPLE_ESP_WIFI_PASS "CONTRASEÑA WIFI"
 
 //etiqueta para los logs
 static const char *TAG = "WIFI_STATION";
