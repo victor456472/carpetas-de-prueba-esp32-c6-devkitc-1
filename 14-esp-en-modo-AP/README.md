@@ -1,6 +1,6 @@
-#modo AP
+# modo AP
 
-##1. ¿que es el modo AP?
+## 1. ¿que es el modo AP?
 
 El modo AP convierte al dispositivo en un punto de acceso inalámbrico, como un router basico. Al estar en este modo:
 - El ESP32 crea y transmite un SSID (nombre de la red Wi-Fi).
