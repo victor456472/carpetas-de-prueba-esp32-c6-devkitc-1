@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "esp_wifi.h": "c",
+        "esp_event.h": "c",
+        "esp_netif.h": "c"
+    }
+}

@@ -8,7 +8,7 @@
 #include "esp_http_server.h"
 
 #define AP_SSID "RED ESP32 VICTOR"
-#define AP_PASSWORD "12345678"
+#define AP_PASSWORD "ChispitA15973"
 #define MAX_STA_CONN 4
 
 static const char *TAG = "WIFI_AP";
@@ -17,7 +17,7 @@ static bool ap_configured = false; // Variable para indicar si el modo AP fue co
 void wifi_init_softap(void) {
     ESP_LOGI(TAG, "Initializing Wi-Fi in AP mode...");
 
-    // Inicializar netif
+    /*se inicializa el tcpip stack*/
     esp_err_t err = esp_netif_init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_netif_init failed: %d", err);
@@ -42,8 +42,32 @@ void wifi_init_softap(void) {
     ESP_LOGI(TAG, "Default Wi-Fi AP created");
 
     // Configuración inicial de Wi-Fi
+    // se establece la estructura por defecto
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+
+    /*
+    Se inicializa el wifi con la estructura por defecto. hay que tener
+    en cuenta que la funcion esp_wifi_init() espera un puntero por lo
+    cual hay que agregar & a la estructura cfg de la configuracion.
+
+    la inicializacion activa los recursos del driver del wifi como la
+    estructura de control de wifi, el buffer de transmision y recepcion,
+    la estructura NVS del wifi, etc... esto tambien inicializa la tarea
+    de Wi-Fi.
+
+    es importante destacar dos cosas:
+    
+    1. Esta API debe ser llamada antes de que otras API Wi-Fi sean llamadas
+    
+    2. Es bueno usar WIFI_INIT_CONFIG_DEFAULT para inicializar la configuracion
+       de valores por defecto. esto garantiza que todos los campos tengan un
+       valor correcto antes de que mas campos sean añadidos al wifi_init_config_t
+       en futuras sentencias.
+    */
     err = esp_wifi_init(&cfg);
+
+    /* si ocurre algun error al inicializar el driver se imprime en
+       el puerto serie. */
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Wi-Fi init failed: %d", err);
         return;
@@ -61,10 +85,14 @@ void wifi_init_softap(void) {
             .authmode = WIFI_AUTH_WPA_WPA2_PSK,
         },
     };
+
+    /* si la contraseña del wifi tiene un tamaño de 0 se establece
+       como una red abierta */
     if (strlen(AP_PASSWORD) == 0) {
         wifi_config.ap.authmode = WIFI_AUTH_OPEN;
     }
 
+    /*  Se establece en modo AP*/
     err = esp_wifi_set_mode(WIFI_MODE_AP);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to set AP mode: %d", err);
@@ -72,6 +100,9 @@ void wifi_init_softap(void) {
     }
     ESP_LOGI(TAG, "Wi-Fi set to AP mode");
 
+    /*
+    Se establece la configuracion del wifi en modo AP
+    */
     err = esp_wifi_set_config(WIFI_IF_AP, &wifi_config);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to configure AP: %d", err);
