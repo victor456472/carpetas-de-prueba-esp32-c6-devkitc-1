@@ -8,10 +8,10 @@ al conectar la placa y subir el codigo, esta emitira una señal wifi con los sig
 
 cualquier dispositivo, ya sea un smartphone, tablet, PC o portatil puede conectarse a esta red.
 
-una vez conectado puede acceder al sitio web del servidor escribiendo en el navegador la siguiente URL: [http://](http://192.168.4.1/). El sitio web es un formulario sobre el cual se puede ingresar un dato y enviar a la ESP32. una vez esta recibe el dato, lo imprime en el monitor serial.
+una vez conectado puede acceder al sitio web del servidor escribiendo en el navegador la siguiente URL: http://192.168.4.1/. El sitio web es un formulario sobre el cual se puede ingresar un dato y enviar a la ESP32. una vez esta recibe el dato, lo imprime en el monitor serial.
 
 ## Informacion tecnica 
 
 el codigo principal tiene las siguiente estructura:
 
-![imagen principal](assets/imagen_principal.png)
+<img src="assets/imagen_principal.png" alt="imagen principal" width="400">
