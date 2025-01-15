@@ -12,6 +12,18 @@ una vez conectado puede acceder al sitio web del servidor escribiendo en el nave
 
 ## Informacion tecnica 
 
-el codigo principal tiene las siguiente estructura:
+el codigo principal esta alojado en la funcion app_main() y tiene la siguiente estructura:
 
 <img src="assets/imagen_principal.png" alt="imagen principal" width="150">
+
+los dos primeros bloques del programa ya han sido estructurados en ejemplos anteriores por lo cual se expandirá unicamente el bloque para inicializar el servidor web
+
+### inicializar servidor web (estructura)
+
+<img src="assets\diagrama_inicializar_servidor.png" alt="diagrama: bloque de inicializacion de servidor" width="150">
+
+
+
+
+
+
