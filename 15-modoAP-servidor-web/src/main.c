@@ -8,7 +8,7 @@
 #include "esp_http_server.h"
 
 #define AP_SSID "RED ESP32 VICTOR"
-#define AP_PASSWORD "ChispitA15973"
+#define AP_PASSWORD "12345678"
 #define MAX_STA_CONN 4
 
 static const char *TAG = "WIFI_AP";
