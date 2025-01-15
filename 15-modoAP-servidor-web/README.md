@@ -14,4 +14,4 @@ una vez conectado puede acceder al sitio web del servidor escribiendo en el nave
 
 el codigo principal tiene las siguiente estructura:
 
-<img src="assets/imagen_principal.png" alt="imagen principal" width="200">
+<img src="assets/imagen_principal.png" alt="imagen principal" width="100">
