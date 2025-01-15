@@ -20,7 +20,7 @@ los dos primeros bloques del programa ya han sido estructurados en ejemplos ante
 
 ### inicializar servidor web (estructura)
 
-<img src="assets\diagrama_inicializar_servidor.png" alt="diagrama: bloque de inicializacion de servidor" width="400">
+<img src="assets\diagrama_inicializar_servidor.png" alt="diagrama: bloque de inicializacion de servidor" width="450">
 
 
 
