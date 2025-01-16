@@ -244,7 +244,7 @@ void start_http_server(void) {
         httpd_register_uri_handler(server, &submit);
         /**
          * Configura y registra un manejador genérico para todas las rutas
-         * (/*) no definidas explicitamente.
+         * no definidas explicitamente.
          */
         httpd_uri_t redirect = {
             .uri = "/*",
