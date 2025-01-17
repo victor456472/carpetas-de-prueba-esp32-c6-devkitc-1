@@ -87,6 +87,7 @@ Esta tabla es esencial porque permite al ESP32 gestionar y acceder a diferentes 
 4. Soporte para Sistemas de Archivos: Reservar particiones para sistemas como SPIFFS o FAT es indispensable para usar memoria flash como almacenamiento de archivos.
 
 **Formato de la Tabla de Particiones**
+
 La tabla de particiones generalmente se define en un archivo CSV (partitions.csv) ubicado en la carpeta raiz del proyecto.
 
 en este caso la tabla de particiones se ve se la siguiente forma:
