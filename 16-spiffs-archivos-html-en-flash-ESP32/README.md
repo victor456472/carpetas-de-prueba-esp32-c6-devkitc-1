@@ -68,6 +68,82 @@ al final, se intenta montar la partición SPIFFS:
 para mayor informacion puede revisar los comentarios en
 la funcion init_spiffs() del archivo src/main.c
 
+## tabla de particiones
+
+La tabla de particiones es un archivo de configuración que define cómo se organiza y divide la memoria flash del ESP32 en diferentes áreas, llamadas particiones. Cada partición tiene un propósito específico, como almacenar datos, el firmware de la aplicación, o sistemas de archivos como SPIFFS o FAT.
+
+Esta tabla es esencial porque permite al ESP32 gestionar y acceder a diferentes partes de su memoria flash de manera eficiente y estructurada.
+
+**¿Por Qué Es Necesaria la Tabla de Particiones?**
+
+1. Organización de la Memoria Flash:
+    - Divide la memoria flash en secciones con usos específicos.
+    - Asegura que diferentes tipos de datos no se sobrescriban accidentalmente.
+
+2. Flexibilidad: Permite personalizar cómo se usa la memoria flash según las necesidades del proyecto.
+
+3. Compatibilidad con Bootloaders y OTA: Define particiones para almacenar múltiples versiones de firmware, facilitando actualizaciones Over-The-Air (OTA).
+
+4. Soporte para Sistemas de Archivos: Reservar particiones para sistemas como SPIFFS o FAT es indispensable para usar memoria flash como almacenamiento de archivos.
+
+**Formato de la Tabla de Particiones**
+La tabla de particiones generalmente se define en un archivo CSV (partitions.csv) ubicado en la carpeta raiz del proyecto.
+
+en este caso la tabla de particiones se ve se la siguiente forma:
+
+| Name      | Type  | SubType | Offset   | Size     | Flags |
+|-----------|-------|---------|----------|----------|-------|
+| nvs       | data  | nvs     | 0x9000   | 0x5000   |       |
+| otadata   | data  | ota     | 0xe000   | 0x2000   |       |
+| app0      | app   | ota_0   | 0x10000  | 0x180000 |       |
+| spiffs    | data  | spiffs  | 0x190000 | 0x70000  |       |
+
+cada una de las particiones tiene un proposito aunque en este caso solo se usa la particion app0, nvs y spiffs.
+
+en el caso de la particion **nvs** se usa como almacenamiento persistente de datos clave-valor que suele guardar lkas configuraciones de las credenciales de Wi-Fi (SSID y contraseña). este esta definido en un tamaño de 0x5000 que corresponde a 20KB.
+
+la particion **otadata** se usa para almacenar informacion de control para las actualizaciones OTA (Over-The-Air). en este caso se define con un tamaño de 0x2000 u 8KB
+
+la partición **app0** contiene el firmware principal de la aplicación y es uno de los slots OTA para almacenar el codigo binario del programa que se ejecuta en el ESP32-DevKit_C6. en este caso se ha definido con un tamaño de 0x180000 que corresponde a 1.5MB
+
+Finalmente, la partición **SPIFFS** se usa como sistema de archivos ligero para almacenar archivos html, css, javascript, imagenes, etc...
+
+**campos de la tabla de particiones**
+
+1. Nombre:
+
+    - Identifica la partición.
+    - Se usa para referenciar esta partición en el código, por ejemplo, "nvs" o "spiffs".
+
+2. Tipo:
+
+    - Define el tipo de partición. Valores comunes:
+        - app: Almacena el firmware de la aplicación.
+        - data: Almacena datos. Puede incluir configuraciones, sistemas de archivos, datos OTA, etc.
+
+3. Subtipo:
+
+    - Especifica un subtipo dentro del tipo de partición.
+    - Subtipos comunes para data:
+        - nvs: Almacén de valores clave-valor no volátiles (NVS).
+        - ota: Datos de actualización OTA.
+        - spiffs: Sistema de archivos SPIFFS.
+    - Subtipos comunes para app:
+        - factory: Firmware de fábrica.
+        - ota_0, ota_1: Firmwares para actualizaciones OTA.
+4. Dirección Offset:
+
+    - Especifica dónde comienza la partición en la memoria flash.
+    - Se define en hexadecimal. Por ejemplo, 0x10000 indica que la partición comienza en la dirección 0x10000.
+
+5. Tamaño:
+
+    - Indica el tamaño de la partición en bytes.
+    - También se define en hexadecimal. Por ejemplo, 0x100000 equivale a 1 MB.
+
+6. Etiqueta (opcional):
+
+    - Proporciona un nombre simbólico para la partición que puede usarse en el código para acceder a ella.
 
 
 
