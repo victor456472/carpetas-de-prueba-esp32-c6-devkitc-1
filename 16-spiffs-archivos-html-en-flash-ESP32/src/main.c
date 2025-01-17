@@ -14,8 +14,40 @@
 
 static const char *TAG = "WIFI_AP";
 
-// Página HTML del formulario
+/**
+ * @brief Esta funcion inicializa el sistema de archivos 
+ * SPIFFS (SPI Flash File System) en un ESP32 utilizando
+ * la API de ESP-IDF. esta no toma ningun parametro ni devuelva
+ * ningun valor.
+ */
 void init_spiffs(void) {
+
+    /**
+     * a continuacion se escribe la estructura 
+     * esp_vfs_spiffs_conf_t la cual es proporcionada 
+     * por ESP-IDF para configurar la inicializacion 
+     * del sistema de archivos  SPIFFS.
+     * 
+     * esta estructura tiene los siguientes parametros:
+     * 
+     * @param[in] base_path define el punto de montaje del
+     * sistema de archivos. en este caso, todos los archivos
+     * SPIFFS serán accesibles bajo el prefijo "/spiffs"
+     * 
+     * @param[in] partition_label Especifica el nombre de 
+     * la particion SPIFFS en la tabla de particiones. en 
+     * este caso se establece en NULL lo que significa que
+     * se usará la partición predeterminada etiquetada para 
+     * SPIFFS.
+     * 
+     * @param[in] max_files Numero máximo de archivos quer
+     * se pueden abrir simultaneamente. en este caso se
+     * configura en 5 archivos.
+     * 
+     * @param[in] format_if_mount_failed si es True, el 
+     * sistema intentará formatear la partición si falla 
+     * al montarla.
+     */
     esp_vfs_spiffs_conf_t conf = {
         .base_path = "/spiffs",
         .partition_label = NULL,
@@ -23,7 +55,26 @@ void init_spiffs(void) {
         .format_if_mount_failed = true
     };
 
+    /**
+     * esta funcion monta el sistema de archivos SPIFFS
+     * basado en la configuración proporcionada en conf.
+     * Devuelve un código de error (esp_err_t), que indica 
+     * si la operación fue exitosa o no.
+     */
+
     esp_err_t ret = esp_vfs_spiffs_register(&conf);
+
+    /**
+     * Finalmente se evalua la respuesta de la funcion
+     * eps_vfs_spiffs_register. si este retorna algo
+     * distinto a ESP_OK se imprime el error en el monitor
+     * serial, indicando que hubo un fallo al inicializar 
+     * SPIFFS.
+     * 
+     * en el caso que retorne ESP_OK, la operacion habrá sido
+     * exitosa y se imprimirá el mensaje "SPIFFS inicializado 
+     * correctamente".
+     */
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Error al inicializar SPIFFS (%s)", esp_err_to_name(ret));
     } else {
