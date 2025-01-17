@@ -36,7 +36,7 @@ en esta documentacion se va a expandir el bloque para iniciar SPIFFS y se expond
 
 Estructura de la función:
 
-<img src="assets\img\Imagen2.png" alt="Diagrama_2_" width="550">
+<img src="assets\img\Imagen2.png" alt="Diagrama_2_" width="580">
 
 El sistema de archivos SPIFFS se registra con el Virtual File System (VFS) del ESP32 usando una estructura. Esto permite que el acceso a SPIFFS se realice a través de las funciones estándar de C, como fopen, fwrite, fread, etc.
 
