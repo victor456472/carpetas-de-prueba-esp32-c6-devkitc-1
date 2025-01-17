@@ -28,7 +28,7 @@ el  programa que se cargará en la ESP32 cumple la misma funcion que el ejemplo 
 
 la estructura general es la siguiente:
 
-<img src="C:\Users\victo\OneDrive\Escritorio\carpetas-de-prueba-esp32-c6-devkitc-1\16-spiffs-archivos-html-en-flash-ESP32\assets\img\Imagen1.png" alt="Diagrama de arquitectura" width="400">
+<img src="assets\img\Imagen1.png" alt="Diagrama_1" width="400">
 
 en esta documentacion se va a expandir el bloque para iniciar SPIFFS y se expondrán algunas modificaciones realizadas dentro de la inicializacion del servidor web
 
@@ -36,7 +36,7 @@ en esta documentacion se va a expandir el bloque para iniciar SPIFFS y se expond
 
 Estructura de la función:
 
-<img src="C:\Users\victo\OneDrive\Escritorio\carpetas-de-prueba-esp32-c6-devkitc-1\16-spiffs-archivos-html-en-flash-ESP32\assets\img\Imagen2.png" alt="Diagrama de arquitectura" width="400">
+<img src="assets\img\Imagen2.png" alt="Diagrama_2_" width="400">
 
 El sistema de archivos SPIFFS se registra con el Virtual File System (VFS) del ESP32 usando una estructura. Esto permite que el acceso a SPIFFS se realice a través de las funciones estándar de C, como fopen, fwrite, fread, etc.
 
