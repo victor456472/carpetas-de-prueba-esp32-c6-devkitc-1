@@ -30,7 +30,7 @@ para ubicar archivos SPIFFS debe crear una carpeta llamada "data" en la raiz del
 
 ## configuración de la memoria flash de la ESP32-C6-DevKitC-1
 
-por defecto, el IDE de platformIO reconoce que la ESP32-C6-DevKit-C1 tiene un total de 2MB de memoria flash. Sin embargo, esta tiene realmente un total de 8MB que deben ser indicados a la plataforma antes de configurar el archivo **platformio.ini** subir los SPIFFS al ESP y subir el programa. para ello dirijase a la consola de PlatforIO y escriba lo siguiente:
+por defecto, el IDE de platformIO reconoce que la ESP32-C6-DevKit-C1 tiene un total de 2MB de memoria flash. Sin embargo, esta tiene realmente un total de 8MB que deben ser indicados a la plataforma antes de configurar el archivo **platformio.ini**; subir los SPIFFS al ESP; y subir el programa. para ello dirijase a la consola de PlatforIO y escriba lo siguiente:
 
 ```bash
 pio run -t menuconfig
@@ -136,6 +136,18 @@ la segunda configuracion se llama **board_build.partitions** la cual especifica 
 
 finalmente, la configuracion **board_build.fs_dir** permite indicar la carpeta local donde se encuentran los archivos que se desean cargar al sistema de archivos SPIFFS. es este caso es la carpeta **data**
 
+El contenido del archivo **platformio.ini** es el siguiente:
+
+```ini
+[env:esp32-c6-devkitc-1]
+platform = espressif32
+board = esp32-c6-devkitc-1
+framework = espidf
+board_build.filesystem = spiffs
+board_build.partitions = partitions.csv
+board_build.fs_dir = data
+```
+
 ## Subir archivos a la memoria flash del ESP32
 
 esta acción es necesaria antes de cargar el programa a la ESP32-C6-DevKitC-1, de lo contrario el servidor no encontrara el formulario http que debe retornarle al cliente. para ello asegurese de que en su proyecto se hayan realizado los pasos anteriores a esta sección (Si usted clonó este proyecto no tiene que preocuparse). Luego abra la terminal de comandos de platformIO y escriba lo siguiente:
@@ -161,7 +173,7 @@ Finalmente, podrá construir y subir el programa a la ESP32-C6-DevKitC-1
 
 ## Acerca del programa cargado en la ESP32
 
-el  programa que se cargará en la ESP32 cumple la misma funcion que el ejemplo 15 sin embargo, esta vez se utilizará SPIFFS para poder almacenar el html.
+el  programa que se cargará en la ESP32 cumple la misma funcion que el [ejemplo15](https://github.com/victor456472/carpetas-de-prueba-esp32-c6-devkitc-1/tree/master/15-modoAP-servidor-web#informacion-general) sin embargo, esta vez se utilizará SPIFFS para poder almacenar el html.
 
 la estructura general es la siguiente:
 
@@ -207,7 +219,7 @@ la funcion init_spiffs() del archivo src/main.c
 
 ### 2. Inicializar servidor web
 
-Para entender la modificación realizada a este bloque del programa dirijase al diagrama que se encuentra en la documentación: [ejemplo15-inicializar-servidor-web](https://github.com/victor456472/carpetas-de-prueba-esp32-c6-devkitc-1/tree/master/15-modoAP-servidor-web#inicializar-servidor-web-estructura). Podrá observar que en el diagrama representativo de la función de inicializacion del servidor web hay un bloque de **registro de rutas**. cada ruta se registra a través de una estructura la cual requiere de una funcion manejadora. en este ejemplo unicamente hay 3 rutas definidas con sus respectivas rutas manejadoras.
+Para entender la modificación realizada a este bloque del programa dirijase al diagrama que se encuentra en la documentación: [ejemplo15-inicializar-servidor-web](https://github.com/victor456472/carpetas-de-prueba-esp32-c6-devkitc-1/tree/master/15-modoAP-servidor-web#inicializar-servidor-web-estructura). Podrá observar que en el diagrama representativo de la función de inicializacion del servidor web hay un bloque de **registro de rutas**. cada ruta se registra a través de una estructura la cual requiere de una **funcion manejadora**.
 
 la modificacion se realiza precisamente en la **funcion manejadora de la ruta a la pagina principal** (/) ya que esta vez se enviará como respuesta al cliente el formulario html a través de un archivo .html en vez de usar una constante del tipo char dentro del codigo. para ello es necesario hacer lectura del SPIFF html almacenado en la memoria flash mediante el siguiente procedimiento:
 
