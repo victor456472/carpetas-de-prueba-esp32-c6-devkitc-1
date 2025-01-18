@@ -1,4 +1,17 @@
-# informacion general
+# contenido
+
+- [Información general](#información-general)
+- [Información tecnica](#información-tecnica)
+    - [Ubicacion de archivos spiffs dentro del proyecto de platformIO](#ubicacion-de-archivos-spiffs-dentro-del-proyecto-de-platformio)
+    - [Configuración de la memoria flash de la esp32-c6-devkitc-1](#configuración-de-la-memoria-flash-de-la-esp32-c6-devkitc-1)
+    - [Tabla de particiones](#tabla-de-particiones)
+    - [Configuracion del archivo platformio.ini](#configuracion-del-archivo-platformioini)
+    - [Subir archivos a la memoria flash del ESP32](#subir-archivos-a-la-memoria-flash-del-esp32)
+    - [Acerca del programa cargado en la ESP32](#acerca-del-programa-cargado-en-la-esp32)
+        - [1. inicializar spiffs](#1-inicializar-spiffs)
+        - [2. inicializar servidor web (modificado)](#2-inicializar-servidor-web-modificado)
+
+# Información general
 
 El presente codigo muestra como se puede inicializar spiffs para cargar un archivo html a la memoria flash de la ESP32-C6-DevKit-C1. Esta accion tiene ciertas ventajas respecto a utilizar codigo html directamente en el codigo del programa:
 
@@ -22,7 +35,7 @@ a pesar de esto tambien tiene algunas desventajas asociadas:
 
 SPIFFS es mucho mas apropiado para proyectos medianos o grandes, los cuales deben manejar multiples recursos estaticos como HTML, CSS, JavaScript e imagenes. tambien es apropiado cuando se desea un diseño modular facil de modificar para mantenimiento.
 
-# informacion tecnica
+# información tecnica
 
 ## ubicacion de archivos SPIFFS dentro del proyecto de platformIO
 
