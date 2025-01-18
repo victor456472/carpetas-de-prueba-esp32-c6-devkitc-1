@@ -24,79 +24,29 @@ SPIFFS es mucho mas apropiado para proyectos medianos o grandes, los cuales debe
 
 # informacion tecnica
 
-## Acerca del programa cargado en la ESP32
+## ubicacion de archivos SPIFFS dentro del proyecto de platformIO
 
-el  programa que se cargará en la ESP32 cumple la misma funcion que el ejemplo 15 sin embargo, esta vez se utilizará SPIFFS para poder almacenar el html.
+para ubicar archivos SPIFFS debe crear una carpeta llamada "data" en la raiz del proyecto. dentro de esta carpeta podra almacenar todos los archivos que se subirán a la memoria flash de la ESP32-C6-DevKitC-1.
 
-la estructura general es la siguiente:
+## configuración de la memoria flash de la ESP32-C6-DevKitC-1
 
-<img src="assets\img\Imagen1.png" alt="Diagrama_1" width="180">
+por defecto, el IDE de platformIO reconoce que la ESP32-C6-DevKit-C1 tiene un total de 2MB de memoria flash. Sin embargo, esta tiene realmente un total de 8MB que deben ser indicados a la plataforma antes de configurar el archivo **platformio.ini** subir los SPIFFS al ESP y subir el programa. para ello dirijase a la consola de PlatforIO y escriba lo siguiente:
 
-en esta documentacion se va a expandir el bloque para iniciar SPIFFS y se expondrán algunas modificaciones realizadas dentro de la inicializacion del servidor web
+```bash
+pio run -t menuconfig
+```
 
-### 1. inicializar SPIFFS
+esto abrira el menú de configuracion de dispositivos IoT para la ESP32. en este menú debe ingresar con la tecla "enter" a:
 
-Estructura de la función:
+```bash
+Serial flasher config -> Flash size
+```
 
-<img src="assets\img\Imagen2.png" alt="Diagrama_2_" width="600">
+donde podrá cambiar el tamaño de la memoria flash a 8MB. para seleccionar una de las opciones que se muestran en Flash size debe presionar la tecla "space" y para guardar los cambios debe presionar la tecla "s".
 
-El sistema de archivos SPIFFS se registra con el Virtual File System (VFS) del ESP32 usando una estructura. Esto permite que el acceso a SPIFFS se realice a través de las funciones estándar de C, como fopen, fwrite, fread, etc.
+para salir del menú presione la tecla "esc" hasta que vuelva a aparecer la consola de comandos.
 
-**descripcion de los campos de la estructura**
-
-- base_path (tipo: const char*): 
-    - Especifica el punto de montaje en el sistema de archivos.
-    - Este es el prefijo que usarás para acceder a los archivos almacenados en SPIFFS. Por ejemplo, si base_path es /spiffs, un archivo llamado config.txt será accesible como /spiffs/config.txt.
-
-- partition_label (tipo: const char*): 
-    - Define la etiqueta de la partición SPIFFS en la tabla de particiones.
-    - Si se deja como NULL, se utiliza la partición predeterminada configurada en la tabla de particiones del ESP32.
-    - Esto es útil si tienes múltiples particiones SPIFFS y deseas especificar cuál usar.
-
-- max_files (tipo: size_t): 
-    - Número máximo de archivos que se pueden abrir simultáneamente en SPIFFS.
-    - Por ejemplo, si estableces max_files a 5, solo se podrán abrir 5 archivos al mismo tiempo.
-
-- format_if_mount_failed (tipo: bool): 
-    - Indica si el sistema debe formatear la partición si falla al intentar montarla.
-    - Si es true, SPIFFS intentará formatear la partición y luego volver a montarla automáticamente.
-    - Si es false, se registrará un error sin intentar formatear.
-
-al final, se intenta montar la partición SPIFFS:
-
-1. Si el montaje falla y format_if_mount_failed es true, formatea la partición automáticamente.
-2. Si todo es exitoso, permite al sistema acceder a los archivos en el prefijo /spiffs.
-
-para mayor informacion puede revisar los comentarios en
-la funcion init_spiffs() del archivo src/main.c
-
-### 2. Inicializar servidor web
-
-Para entender la modificación realizada a este bloque del programa dirijase al diagrama que se encuentra en la documentación: [ejemplo15-inicializar-servidor-web](https://github.com/victor456472/carpetas-de-prueba-esp32-c6-devkitc-1/tree/master/15-modoAP-servidor-web#inicializar-servidor-web-estructura). Podrá observar que en el diagrama representativo de la función de inicializacion del servidor web hay un bloque de **registro de rutas**. cada ruta se registra a través de una estructura la cual requiere de una funcion manejadora. en este ejemplo unicamente hay 3 rutas definidas con sus respectivas rutas manejadoras.
-
-la modificacion se realiza precisamente en la **funcion manejadora de la ruta a la pagina principal** (/) ya que esta vez se enviará como respuesta al cliente el formulario html a través de un archivo .html en vez de usar una constante del tipo char dentro del codigo. para ello es necesario hacer lectura del SPIFF html almacenado en la memoria flash mediante el siguiente procedimiento:
-
-<img src="assets\img\Imagen3.png" alt="Diagrama_3" width="900">
-
-es importante aclarar que cada vez que el programa lee
-un fragmento del archivo .html hay un indicador interno que informa sobre el grupo de datos fueron leidos lo cual permite que en la siguiente iteracion se lea unicamente el siguiente grupo de datos contenidos en el archivo. este indicador se maneja dentro de la funcion fread() de la libreria <stdio.h>. 
-
-la lectura del archivo html se hace por fragmentos de informacion debido al limite de tamaño impuesto por el tipo de dato del búfer (arreglo char) el cual requiere de un tamaño fijo. en este caso se escogio 1024 bytes pero puede hacerse mas grande o mas pequeño dependiendo de la aplicación.
-
-Tambien debe haber un conteo del numero de datos leidos en cada fragmento para poder determinar cuando va a finalizar la lectura del archivo. este conteo se hace a traves de una variable llamada "read_bytes".
-
-Supongamos que el archivo tiene 2500 bytes y el tamaño del búfer es de 1024 bytes. En este caso, el flujo de lectura del archivo puede ejemplificarse de la siguiente forma:
-
-| Iteración | Bytes disponibles | read_bytes | Acción                |
-|-----------|-------------------|------------|-----------------------|
-| 1         | 2500              | 1024       | Se envían 1024 bytes  |
-| 2         | 1476              | 1024       | Se envían 1024 bytes  |
-| 3         | 452               | 452        | Se envían 452 bytes   |
-| 4         | 0                 | 0          | Bucle termina (EOF)   |
-
-donde EOF significa "End Of File" o "fin del archivo"
-
-para mayor informacion puede revisar los comentarios en la funcion root_handler() del archivo src/main.c
+**Nota:** esta accion solo se realiza una sola vez y para este caso ya fue realizada por lo cual no es necesario que usted la repita si clonó este proyecto.
 
 ## tabla de particiones
 
@@ -175,6 +125,113 @@ Finalmente, la partición **SPIFFS** se usa como sistema de archivos ligero para
 6. Etiqueta (opcional):
 
     - Proporciona un nombre simbólico para la partición que puede usarse en el código para acceder a ella.
+
+## Configuracion del archivo platformio.ini
+
+es necesario hacer unas configuracuiones adicionales al archivo platformio.ini para que el IDE prepare el proyecto antes de usar SÏFFS.
+
+la primera configuracion se llama **board_build.filesystem** la cual indica cual sera el sistema de archivos que se usará en el proyecto. en este caso es SPIFFS (SPI Flash Files System).
+
+la segunda configuracion se llama **board_build.partitions** la cual especifica el archivo CSV que define el esquema de particiones para la memoria flash del ESP32. en este caso el archivo se llama partitions.csv
+
+finalmente, la configuracion **board_build.fs_dir** permite indicar la carpeta local donde se encuentran los archivos que se desean cargar al sistema de archivos SPIFFS. es este caso es la carpeta **data**
+
+## Subir archivos a la memoria flash del ESP32
+
+esta acción es necesaria antes de cargar el programa a la ESP32-C6-DevKitC-1, de lo contrario el servidor no encontrara el formulario http que debe retornarle al cliente. para ello asegurese de que en su proyecto se hayan realizado los pasos anteriores a esta sección (Si usted clonó este proyecto no tiene que preocuparse). Luego abra la terminal de comandos de platformIO y escriba lo siguiente:
+
+1. Limpiar cualquier compilacion previa:
+
+```bash
+pio run --target clean
+```
+
+2. Construir SPIFFS:
+
+```bash
+pio run --target buildfs
+```
+
+3. subir SPIFFS al ESP32-C6-DevKitC-1:
+
+```bash
+pio run --target uploadfs
+```
+Finalmente, podrá construir y subir el programa a la ESP32-C6-DevKitC-1
+
+## Acerca del programa cargado en la ESP32
+
+el  programa que se cargará en la ESP32 cumple la misma funcion que el ejemplo 15 sin embargo, esta vez se utilizará SPIFFS para poder almacenar el html.
+
+la estructura general es la siguiente:
+
+<img src="assets\img\Imagen1.png" alt="Diagrama_1" width="180">
+
+en esta documentacion se va a expandir el bloque para iniciar SPIFFS y se expondrán algunas modificaciones realizadas dentro de la inicializacion del servidor web
+
+### 1. inicializar SPIFFS
+
+Estructura de la función:
+
+<img src="assets\img\Imagen2.png" alt="Diagrama_2_" width="600">
+
+El sistema de archivos SPIFFS se registra con el Virtual File System (VFS) del ESP32 usando una estructura. Esto permite que el acceso a SPIFFS se realice a través de las funciones estándar de C, como fopen, fwrite, fread, etc.
+
+**descripcion de los campos de la estructura**
+
+- base_path (tipo: const char*): 
+    - Especifica el punto de montaje en el sistema de archivos.
+    - Este es el prefijo que usarás para acceder a los archivos almacenados en SPIFFS. Por ejemplo, si base_path es /spiffs, un archivo llamado config.txt será accesible como /spiffs/config.txt.
+
+- partition_label (tipo: const char*): 
+    - Define la etiqueta de la partición SPIFFS en la tabla de particiones.
+    - Si se deja como NULL, se utiliza la partición predeterminada configurada en la tabla de particiones del ESP32.
+    - Esto es útil si tienes múltiples particiones SPIFFS y deseas especificar cuál usar.
+
+- max_files (tipo: size_t): 
+    - Número máximo de archivos que se pueden abrir simultáneamente en SPIFFS.
+    - Por ejemplo, si estableces max_files a 5, solo se podrán abrir 5 archivos al mismo tiempo.
+
+- format_if_mount_failed (tipo: bool): 
+    - Indica si el sistema debe formatear la partición si falla al intentar montarla.
+    - Si es true, SPIFFS intentará formatear la partición y luego volver a montarla automáticamente.
+    - Si es false, se registrará un error sin intentar formatear.
+
+al final, se intenta montar la partición SPIFFS:
+
+1. Si el montaje falla y format_if_mount_failed es true, formatea la partición automáticamente.
+2. Si todo es exitoso, permite al sistema acceder a los archivos en el prefijo /spiffs.
+
+para mayor informacion puede revisar los comentarios en
+la funcion init_spiffs() del archivo src/main.c
+
+### 2. Inicializar servidor web
+
+Para entender la modificación realizada a este bloque del programa dirijase al diagrama que se encuentra en la documentación: [ejemplo15-inicializar-servidor-web](https://github.com/victor456472/carpetas-de-prueba-esp32-c6-devkitc-1/tree/master/15-modoAP-servidor-web#inicializar-servidor-web-estructura). Podrá observar que en el diagrama representativo de la función de inicializacion del servidor web hay un bloque de **registro de rutas**. cada ruta se registra a través de una estructura la cual requiere de una funcion manejadora. en este ejemplo unicamente hay 3 rutas definidas con sus respectivas rutas manejadoras.
+
+la modificacion se realiza precisamente en la **funcion manejadora de la ruta a la pagina principal** (/) ya que esta vez se enviará como respuesta al cliente el formulario html a través de un archivo .html en vez de usar una constante del tipo char dentro del codigo. para ello es necesario hacer lectura del SPIFF html almacenado en la memoria flash mediante el siguiente procedimiento:
+
+<img src="assets\img\Imagen3.png" alt="Diagrama_3" width="900">
+
+es importante aclarar que cada vez que el programa lee
+un fragmento del archivo .html hay un indicador interno que informa sobre el grupo de datos fueron leidos lo cual permite que en la siguiente iteracion se lea unicamente el siguiente grupo de datos contenidos en el archivo. este indicador se maneja dentro de la funcion fread() de la libreria <stdio.h>. 
+
+la lectura del archivo html se hace por fragmentos de informacion debido al limite de tamaño impuesto por el tipo de dato del búfer (arreglo char) el cual requiere de un tamaño fijo. en este caso se escogio 1024 bytes pero puede hacerse mas grande o mas pequeño dependiendo de la aplicación.
+
+Tambien debe haber un conteo del numero de datos leidos en cada fragmento para poder determinar cuando va a finalizar la lectura del archivo. este conteo se hace a traves de una variable llamada "read_bytes".
+
+Supongamos que el archivo tiene 2500 bytes y el tamaño del búfer es de 1024 bytes. En este caso, el flujo de lectura del archivo puede ejemplificarse de la siguiente forma:
+
+| Iteración | Bytes disponibles | read_bytes | Acción                |
+|-----------|-------------------|------------|-----------------------|
+| 1         | 2500              | 1024       | Se envían 1024 bytes  |
+| 2         | 1476              | 1024       | Se envían 1024 bytes  |
+| 3         | 452               | 452        | Se envían 452 bytes   |
+| 4         | 0                 | 0          | Bucle termina (EOF)   |
+
+donde EOF significa "End Of File" o "fin del archivo"
+
+para mayor informacion puede revisar los comentarios en la funcion root_handler() del archivo src/main.c
 
 para aprender mas sobre SPIFFS, tabla de particiones y el uso de la memoria flash se recomienda visitar el siguiente enlace:
 
