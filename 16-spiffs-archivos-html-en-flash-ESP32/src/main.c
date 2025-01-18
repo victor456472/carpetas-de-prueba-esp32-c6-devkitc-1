@@ -92,23 +92,147 @@ sobre la solicitud entrante como la ruta solicitada, los encabezados
 y más.
 */ 
 esp_err_t root_handler(httpd_req_t *req) {
+    /**
+     * la funcion fopen() abre el archivo especificado en
+     * modo lectura ("r"). el archivo debe estar en la particion
+     * SPIFFS y disponible en la ruta /spiffs/index.html
+     * 
+     * file es un puntero al archivo que será leido. si el 
+     * archivo no se encuentra o no se puede abrir, fopen
+     * devuelve NULL.
+     * 
+     * la funcion fopen() tiene dos parametros:
+     * 
+     * @param[in] filename Ruta del archivo que se desea abrir
+     * @param[in] mode modo de apertura. este puede tener varios tipos:
+     *                 "r" - leer (error si el arhivo no existe)
+     *                 "w" - Escribir (crea el archivo si no existe o lo sobrescribe si ya existe)
+     *                 "a" - Añadir (escribe al final del archivo)
+     *                 "r+" - Leer y escribir
+     *                 "w+" - Leer y escribir (sobrescribe el archivo existente)
+     *                 "a+" - Leer y escribir (añade al final del archivo)
+     * 
+     * @note
+     * 
+     * El tipo de dato FILE en C representa una estructura
+     * definida en la biblioteca estándar <stdio.h> que se 
+     * utiliza para manejar operaciones de archivos. es una
+     * abstraccion que contiene toda la informacion necesaria
+     * para interactuar con un archivoen el sistema de
+     * archivos.
+     * 
+     * Es importante aclarar que FILE no es un tipo de datos
+     * primitivo como "int" o "char". Es una estructura
+     * definida internamente en la biblioteca estandar de C.
+     * 
+     * la definición de FILE puede variar dependiendo del
+     * sistema operativo y la implementación de la biblioteca
+     * C, pero tipicamente contiene:
+     * 
+     * 1) puntero al archivo en el sistema de archivos
+     * 
+     * 2) buffer interno para manejar datos durante la lectura
+     * y escritura
+     * 
+     * 3) indicador de fin de archivo (EOF)
+     * 
+     * 4) errores relacionados con la operacion de archivo
+     * 
+     * FILE se utiliza con las funciones de manejo de archivos
+     * como fopen, fclose, fread, fwrite, etc...
+     */
     FILE *file = fopen("/spiffs/index.html", "r");
+
+    /**
+     * Si el puntero file tiene un valor de NULL significa
+     * que la funcion fopen no pudo abrir el archivo por lo
+     * cual se evalua la condicion !file ya que si file es 
+     * NULL, !file es True y por ende el programa entra a la 
+     * condición para imprimir en el monitor serie el mensaje
+     * "no se pudo abrir el archivo HTML" ademas de enviar un
+     * error 404 al servidor y retornar ESP_FAIL.
+     */
     if (!file) {
         ESP_LOGE(TAG, "No se pudo abrir el archivo HTML");
         httpd_resp_send_404(req);
         return ESP_FAIL;
     }
 
-    char buffer[1024];
-    size_t read_bytes;
+    /**
+     * La siguiente función establece el encabezado HTTP 
+     * Content-Type de la respuesta como text/html. esto
+     * indica al navegador del cliente que el contenido
+     * que se esta enviando es una pagina HTML.
+     */
     httpd_resp_set_type(req, "text/html");
 
+    /**
+     * Se declara un buffer temporal de 1024 bytes para
+     * almacenar partes del archivo mientras se lee
+     */
+    char buffer[1024];
+
+    /**
+     * size_t es un tipo de dato sin signo que se utiliza
+     * comúnmente para representar tamaños o conteos en C.
+     * Es el tipo de retorno de funciones como fread, por 
+     * lo cual es el tipo de dato adecuado para almacenar
+     * el tamaño del archivo.
+     */
+    size_t read_bytes;
+
+    /**
+     * El siguiente ciclo permite enviar el contenido html
+     * al servidor por chunks o "paquetes". para ello primero
+     * se usa la funcion fread() la cual lee datos desde el
+     * archivo (file) en bloques del tamaño especificado 
+     * (1024 bytes) y los guarda en el búfer (buffer).
+     * 
+     * la funcion fread tiene los siguientes parametros:
+     * @param[out] buffer Direccion del buffer donde se 
+     * almacenan los datos leidos
+     * @param[in] 1 tamaño de cada elemento que se lee 
+     * (1 byte en este caso)
+     * @param[in] sizeofBuffer maximo número de elementos 
+     * a leer (hasta 1024 bytes en este caso)
+     * 
+     * Al ser invocada con los limites establecidos, la 
+     * función devuelve la cantidad real de bytes leidos
+     * desde el archivo en cada iteración y guarda el conteo 
+     * dentro de read_bytes. si fread encuentra menos bytes 
+     * (por ejemplo al final del archivo), el valor será
+     * menor que el tamaño del buffer.
+     * 
+     * Si ocurre un error o se alcanza el final del archiv
+     * fread() devuelve 0.
+     * 
+     * con esto en mente se puede evaluar si read_bytes es
+     * mayor a 0. en tal caso se debe enviar el paquete de 
+     * datos al cliente. en caso que readbytes sea 0
+     * significa que se llegó al final del archivo y se 
+     * debe finalizar el ciclo.
+     */
     while ((read_bytes = fread(buffer, 1, sizeof(buffer), file)) > 0) {
+        /**
+         * con la funcion httpd_resp_send_chunk() se envia
+         * el contenido leido en el fuffer como un fragmento
+         * (chunk) al cliente. el tamaño del fragmento es 
+         * igual a read_bytes.
+         */
         httpd_resp_send_chunk(req, buffer, read_bytes);
     }
-    httpd_resp_send_chunk(req, NULL, 0); // Fin de la respuesta
+    /**
+     * A continuacion se envia un fragmento vacio (NULL) de tamaño
+     * 0 al cliente. esto indica que ya no se enviarán más datos. 
+     * esta acción es obligatoria para finalizar una respuesta
+     * con "chunked encoding"
+     */
+    httpd_resp_send_chunk(req, NULL, 0); 
+    /**
+     * Finalmente se cierra el archivo abierto por fopen()
+     * para liberar recursos del sistema.
+     */
     fclose(file);
-    return ESP_OK;
     return ESP_OK;
 }
 

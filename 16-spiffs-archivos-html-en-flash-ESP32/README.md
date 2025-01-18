@@ -22,7 +22,9 @@ a pesar de esto tambien tiene algunas desventajas asociadas:
 
 SPIFFS es mucho mas apropiado para proyectos medianos o grandes, los cuales deben manejar multiples recursos estaticos como HTML, CSS, JavaScript e imagenes. tambien es apropiado cuando se desea un diseño modular facil de modificar para mantenimiento.
 
-## informacion tecnica
+# informacion tecnica
+
+## Acerca del programa cargado en la ESP32
 
 el  programa que se cargará en la ESP32 cumple la misma funcion que el ejemplo 15 sin embargo, esta vez se utilizará SPIFFS para poder almacenar el html.
 
@@ -67,6 +69,32 @@ al final, se intenta montar la partición SPIFFS:
 
 para mayor informacion puede revisar los comentarios en
 la funcion init_spiffs() del archivo src/main.c
+
+### 2. Inicializar servidor web
+
+Para entender la modificación realizada a este bloque del programa dirijase al diagrama que se encuentra en la documentación del [ejemplo15-servidor-web-estructura](https://github.com/victor456472/carpetas-de-prueba-esp32-c6-devkitc-1/tree/master/15-modoAP-servidor-web#inicializar-servidor-web-estructura). Podrá observar que en el diagrama representativo de la función de inicializacion del servidor web hay un bloque de **registro de rutas**. cada ruta se registra a través de una estructura la cual requiere de una funcion manejadora. en este ejemplo unicamente hay 3 rutas definidas con sus respectivas rutas manejadoras.
+
+la modificacion se realiza precisamente en la **funcion manejadora de la ruta a la pagina principal** (/) ya que esta vez se enviará como respuesta al cliente el formulario html a través de un archivo .html en vez de usar una constante del tipo char dentro del codigo. para ello es necesario hacer lectura del SPIFF html almacenado en la memoria flash mediante el siguiente procedimiento:
+
+<img src="assets\img\Imagen3.png" alt="Diagrama_3" width="1000">
+
+es importante aclarar que cada vez que el programa lee
+un fragmento del archivo .html hay un indicador interno que informa sobre que grupo de datos fueron leido lo cual permite que la siguiente iteracion se lea unicamente el siguiente grupo de datos que no haya sido leido. este indicador se maneja dentro de la funcion fread de la libreria <stdio.h>. 
+
+la lectura del archivo html se hace por fragmentos de informacion debido al limite de tamaño impuesto por el tipo de dato del búfer (arreglo char) el cual requiere de un tamaño fijo. en este caso se escogio 1024 pero puede hacerse mas grande o mas pequeño dependiendo de la aplicación.
+
+Tambien debe haber un conteo del numero de datos leidos en cada fragmento para poder determinar cuando va a finalizar la lectura del archivo. este conteo se hace a traves de una variable llamada "read_bytes".
+
+Supongamos que el archivo tiene 2500 bytes y el tamaño del búfer es de 1024 bytes. En este caso, el flujo de lectura del archivo puede ejemplificarse de la siguiente forma:
+
+| Iteración | Bytes disponibles | read_bytes | Acción                |
+|-----------|-------------------|------------|-----------------------|
+| 1         | 2500              | 1024       | Se envían 1024 bytes  |
+| 2         | 1476              | 1024       | Se envían 1024 bytes  |
+| 3         | 452               | 452        | Se envían 452 bytes   |
+| 4         | 0                 | 0          | Bucle termina (EOF)   |
+
+donde EOF significa "End Of File" o "fin del archivo"
 
 ## tabla de particiones
 
@@ -146,7 +174,9 @@ Finalmente, la partición **SPIFFS** se usa como sistema de archivos ligero para
 
     - Proporciona un nombre simbólico para la partición que puede usarse en el código para acceder a ella.
 
+para aprender mas sobre SPIFFS, tabla de particiones y el uso de la memoria flash se recomienda visitar el siguiente enlace:
 
+https://www.youtube.com/watch?v=V9-cgXag4Ko&t=242s
 
 
 
