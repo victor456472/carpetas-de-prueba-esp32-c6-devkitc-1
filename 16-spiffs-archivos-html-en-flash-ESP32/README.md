@@ -81,7 +81,7 @@ la modificacion se realiza precisamente en la **funcion manejadora de la ruta a 
 es importante aclarar que cada vez que el programa lee
 un fragmento del archivo .html hay un indicador interno que informa sobre el grupo de datos fueron leidos lo cual permite que en la siguiente iteracion se lea unicamente el siguiente grupo de datos contenidos en el archivo. este indicador se maneja dentro de la funcion fread() de la libreria <stdio.h>. 
 
-la lectura del archivo html se hace por fragmentos de informacion debido al limite de tamaño impuesto por el tipo de dato del búfer (arreglo char) el cual requiere de un tamaño fijo. en este caso se escogio 1024 pero puede hacerse mas grande o mas pequeño dependiendo de la aplicación.
+la lectura del archivo html se hace por fragmentos de informacion debido al limite de tamaño impuesto por el tipo de dato del búfer (arreglo char) el cual requiere de un tamaño fijo. en este caso se escogio 1024 bytes pero puede hacerse mas grande o mas pequeño dependiendo de la aplicación.
 
 Tambien debe haber un conteo del numero de datos leidos en cada fragmento para poder determinar cuando va a finalizar la lectura del archivo. este conteo se hace a traves de una variable llamada "read_bytes".
 
