@@ -38,7 +38,7 @@ en esta documentacion se va a expandir el bloque para iniciar SPIFFS y se expond
 
 Estructura de la función:
 
-<img src="assets\img\Imagen2.png" alt="Diagrama_2_" width="620">
+<img src="assets\img\Imagen2.png" alt="Diagrama_2_" width="600">
 
 El sistema de archivos SPIFFS se registra con el Virtual File System (VFS) del ESP32 usando una estructura. Esto permite que el acceso a SPIFFS se realice a través de las funciones estándar de C, como fopen, fwrite, fread, etc.
 
@@ -72,11 +72,11 @@ la funcion init_spiffs() del archivo src/main.c
 
 ### 2. Inicializar servidor web
 
-Para entender la modificación realizada a este bloque del programa dirijase al diagrama que se encuentra en la documentación del [ejemplo15-servidor-web-estructura](https://github.com/victor456472/carpetas-de-prueba-esp32-c6-devkitc-1/tree/master/15-modoAP-servidor-web#inicializar-servidor-web-estructura). Podrá observar que en el diagrama representativo de la función de inicializacion del servidor web hay un bloque de **registro de rutas**. cada ruta se registra a través de una estructura la cual requiere de una funcion manejadora. en este ejemplo unicamente hay 3 rutas definidas con sus respectivas rutas manejadoras.
+Para entender la modificación realizada a este bloque del programa dirijase al diagrama que se encuentra en la documentación: [ejemplo15-inicializar-servidor-web](https://github.com/victor456472/carpetas-de-prueba-esp32-c6-devkitc-1/tree/master/15-modoAP-servidor-web#inicializar-servidor-web-estructura). Podrá observar que en el diagrama representativo de la función de inicializacion del servidor web hay un bloque de **registro de rutas**. cada ruta se registra a través de una estructura la cual requiere de una funcion manejadora. en este ejemplo unicamente hay 3 rutas definidas con sus respectivas rutas manejadoras.
 
 la modificacion se realiza precisamente en la **funcion manejadora de la ruta a la pagina principal** (/) ya que esta vez se enviará como respuesta al cliente el formulario html a través de un archivo .html en vez de usar una constante del tipo char dentro del codigo. para ello es necesario hacer lectura del SPIFF html almacenado en la memoria flash mediante el siguiente procedimiento:
 
-<img src="assets\img\Imagen3.png" alt="Diagrama_3" width="1000">
+<img src="assets\img\Imagen3.png" alt="Diagrama_3" width="900">
 
 es importante aclarar que cada vez que el programa lee
 un fragmento del archivo .html hay un indicador interno que informa sobre que grupo de datos fueron leido lo cual permite que la siguiente iteracion se lea unicamente el siguiente grupo de datos que no haya sido leido. este indicador se maneja dentro de la funcion fread de la libreria <stdio.h>. 
