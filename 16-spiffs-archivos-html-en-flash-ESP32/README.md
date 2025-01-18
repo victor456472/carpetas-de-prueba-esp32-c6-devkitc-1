@@ -79,7 +79,7 @@ la modificacion se realiza precisamente en la **funcion manejadora de la ruta a 
 <img src="assets\img\Imagen3.png" alt="Diagrama_3" width="900">
 
 es importante aclarar que cada vez que el programa lee
-un fragmento del archivo .html hay un indicador interno que informa sobre que grupo de datos fueron leido lo cual permite que la siguiente iteracion se lea unicamente el siguiente grupo de datos que no haya sido leido. este indicador se maneja dentro de la funcion fread de la libreria <stdio.h>. 
+un fragmento del archivo .html hay un indicador interno que informa sobre que grupo de datos fueron leidos lo cual permite que la siguiente iteracion se lea unicamente el siguiente grupo de datos que no haya sido leido. este indicador se maneja dentro de la funcion fread de la libreria <stdio.h>. 
 
 la lectura del archivo html se hace por fragmentos de informacion debido al limite de tamaño impuesto por el tipo de dato del búfer (arreglo char) el cual requiere de un tamaño fijo. en este caso se escogio 1024 pero puede hacerse mas grande o mas pequeño dependiendo de la aplicación.
 
@@ -135,7 +135,7 @@ la particion **otadata** se usa para almacenar informacion de control para las a
 
 la partición **app0** contiene el firmware principal de la aplicación y es uno de los slots OTA para almacenar el codigo binario del programa que se ejecuta en el ESP32-DevKit_C6. en este caso se ha definido con un tamaño de 0x180000 que corresponde a 1.5MB
 
-Finalmente, la partición **SPIFFS** se usa como sistema de archivos ligero para almacenar archivos html, css, javascript, imagenes, etc...
+Finalmente, la partición **SPIFFS** se usa como sistema de archivos ligero para almacenar archivos html, css, javascript, imagenes, etc... este se define en un tamaño de 0x7000 que corresponde a 448KB
 
 **campos de la tabla de particiones**
 
