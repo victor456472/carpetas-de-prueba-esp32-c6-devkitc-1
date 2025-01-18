@@ -96,6 +96,8 @@ Supongamos que el archivo tiene 2500 bytes y el tamaño del búfer es de 1024 by
 
 donde EOF significa "End Of File" o "fin del archivo"
 
+para mayor informacion puede revisar los comentarios en la funcion root_handler() del archivo src/main.c
+
 ## tabla de particiones
 
 La tabla de particiones es un archivo de configuración que define cómo se organiza y divide la memoria flash del ESP32 en diferentes áreas, llamadas particiones. Cada partición tiene un propósito específico, como almacenar datos, el firmware de la aplicación, o sistemas de archivos como SPIFFS o FAT.
