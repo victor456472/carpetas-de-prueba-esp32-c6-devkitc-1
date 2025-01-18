@@ -217,7 +217,7 @@ al final, se intenta montar la partición SPIFFS:
 para mayor informacion puede revisar los comentarios en
 la funcion init_spiffs() del archivo src/main.c
 
-### 2. Inicializar servidor web
+### 2. Inicializar servidor web (modificado)
 
 Para entender la modificación realizada a este bloque del programa dirijase al diagrama que se encuentra en la documentación: [ejemplo15-inicializar-servidor-web](https://github.com/victor456472/carpetas-de-prueba-esp32-c6-devkitc-1/tree/master/15-modoAP-servidor-web#inicializar-servidor-web-estructura). Podrá observar que en el diagrama representativo de la función de inicializacion del servidor web hay un bloque de **registro de rutas**. cada ruta se registra a través de una estructura la cual requiere de una **funcion manejadora**.
 
