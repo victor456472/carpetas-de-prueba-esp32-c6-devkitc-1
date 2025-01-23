@@ -670,12 +670,14 @@ void app_main(void) {
             ESP_EVENT_ANY_ID,
             &event_handler,
             NULL,
-            NULL));
+            NULL
+        ));
         ESP_ERROR_CHECK(esp_event_handler_instance_register(
             IP_EVENT,
             IP_EVENT_STA_GOT_IP,
             &event_handler,
             NULL,
-            NULL));
-        }
+            NULL
+        ));
     }
+}
