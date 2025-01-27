@@ -9,6 +9,8 @@
 #include "esp_spiffs.h"
 #include "led_strip.h"
 #include "nvs.h"
+#include "driver/gpio.h"
+#include "esp_timer.h"  // Librería para medir tiempo en microsegundos
 
 #define AP_SSID "RED ESP32 VICTOR"
 #define AP_PASSWORD "12345678"
@@ -27,10 +29,24 @@
 #define NVS_KEY_SSID "ssid"
 #define NVS_KEY_PASSWORD "password"
 
+#define BUTTON_GPIO 18       // Pin GPIO donde está conectado el botón
+#define HOLD_TIME_MS 10000   // Tiempo en milisegundos para considerar que el botón está presionado (10 segundos)
+
 static const char *TAG = "WIFI_AP";
 static led_strip_t *led_strip=NULL;
 
-bool borrar_memoria = false;
+bool habilitar_indicador_conectando = true;
+
+void init_gpio() {
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << BUTTON_GPIO), // Seleccionar el pin
+        .mode = GPIO_MODE_INPUT,               // Configurar como entrada
+        .pull_up_en = GPIO_PULLUP_DISABLE,     // Deshabilitar pull-up
+        .pull_down_en = GPIO_PULLDOWN_ENABLE,  // Habilitar pull-down
+        .intr_type = GPIO_INTR_DISABLE         // Sin interrupciones
+    };
+    gpio_config(&io_conf);
+}
 
 // Función para guardar el estado en NVS
 void save_wifi_config_to_nvs(wifi_mode_t mode, const char *ssid, const char *password) {
@@ -320,7 +336,10 @@ esp_err_t root_handler(httpd_req_t *req) {
 static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         ESP_LOGI(TAG, "Wi-Fi STA iniciado, conectando...");
-        set_led_color(COLOR_YELLOW);
+        if (habilitar_indicador_conectando)
+        {
+            set_led_color(COLOR_YELLOW);
+        }
         esp_wifi_connect(); // Iniciar la conexión
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         ESP_LOGW(TAG, "Conexión fallida, intentando reconectar...");
@@ -369,16 +388,24 @@ void wifi_init_sta(const char *ssid, const char *password) {
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    set_led_color(COLOR_YELLOW);
+
+    
     ESP_LOGI(TAG, "Conectándose a SSID: %s", ssid);
 
     // Intentar conexión
     esp_err_t ret = esp_wifi_connect();
     if (ret != ESP_OK) {
-        set_led_color(COLOR_RED);
+        if (!habilitar_indicador_conectando)
+        {
+            set_led_color(COLOR_RED);
+        }
         ESP_LOGE(TAG, "Error al intentar conectarse: %s", esp_err_to_name(ret));
     } else {
-        set_led_color(COLOR_LIGHT_GREEN);
+        if (!habilitar_indicador_conectando)
+        {
+            set_led_color(COLOR_LIGHT_GREEN);
+        }
+        
         ESP_LOGI(TAG, "Conectado a la red");
     }
 }
@@ -591,7 +618,7 @@ void start_http_server(void) {
  */
 void wifi_init_softap(void) {
     ESP_LOGI(TAG, "Inicializando Wi-Fi en modo AP...");
-
+    habilitar_indicador_conectando = true;
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     esp_netif_create_default_wifi_ap();
@@ -622,62 +649,93 @@ void wifi_init_softap(void) {
     ESP_LOGI(TAG, "Modo AP iniciado con SSID: %s, Contraseña: %s", AP_SSID, AP_PASSWORD);
 }
 
+void clean_wifi_sta_connect_credentials(void *param) {
+    uint64_t press_start_time = 0;  // Tiempo en que el botón fue presionado
+    bool button_held = false;       // Estado del botón (si fue mantenido por más de 10 segundos)
 
+    while (1) {
+        // Leer el estado del botón
+        int button_state = gpio_get_level(BUTTON_GPIO);
 
+        if (button_state == 1) {  // Botón presionado
+            if (press_start_time == 0) {
+                // Registrar el momento en que se presionó el botón
+                press_start_time = esp_timer_get_time() / 1000; // Tiempo actual en ms
+            } else {
+                // Calcular cuánto tiempo ha estado presionado
+                uint64_t elapsed_time = (esp_timer_get_time() / 1000) - press_start_time;
+                if (elapsed_time >= HOLD_TIME_MS && !button_held) {
+                    button_held = true; // Marcamos que el botón fue mantenido
+                    ESP_LOGI(TAG, "Borrando toda la memoria NVS...");
+                    ESP_ERROR_CHECK(nvs_flash_erase());
+                    ESP_ERROR_CHECK(nvs_flash_init());
+                    ESP_LOGI(TAG, "Memoria NVS borrada y reinicializada.");
+                    wifi_init_softap();
+                    start_http_server();
+                }
+            }
+        } else {  // Botón no presionado
+            press_start_time = 0; // Reiniciar el tiempo de inicio
+            button_held = false;  // Reiniciar el estado del botón mantenido
+        }
+
+        vTaskDelay(10 / portTICK_PERIOD_MS); // Pequeña espera para reducir consumo de CPU
+    }
+}
 
 // Modifica la función app_main para usar estas funciones
 void app_main(void) {
-    // Inicializar NVS
-    if (borrar_memoria)
-    {
-        ESP_LOGI(TAG, "Borrando toda la memoria NVS...");
+
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
         ESP_ERROR_CHECK(nvs_flash_init());
-        ESP_LOGI(TAG, "Memoria NVS borrada y reinicializada.");
-    }else
-    {
-        esp_err_t ret = nvs_flash_init();
-        if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-            ESP_ERROR_CHECK(nvs_flash_erase());
-            ESP_ERROR_CHECK(nvs_flash_init());
-        }
-
-        // Inicializar LED RGB del ESP32
-        init_led_strip();
-
-        // Variables para las credenciales
-        char ssid[32] = {0};
-        char password[64] = {0};
-
-        // Leer el estado de Wi-Fi desde NVS
-        wifi_mode_t mode = read_wifi_config_from_nvs(ssid, sizeof(ssid), password, sizeof(password));
-
-        if (mode == WIFI_MODE_STA && strlen(ssid) > 0 && strlen(password) > 0) {
-            ESP_ERROR_CHECK(esp_netif_init());
-            ESP_ERROR_CHECK(esp_event_loop_create_default());
-            // Si hay credenciales, iniciar en modo STA
-            wifi_init_sta(ssid, password);
-        } else {
-            // Si no hay credenciales, iniciar en modo AP
-            init_spiffs();
-            wifi_init_softap();
-            start_http_server();
-        }
-
-        // Manejar eventos de Wi-Fi
-        ESP_ERROR_CHECK(esp_event_handler_instance_register(
-            WIFI_EVENT,
-            ESP_EVENT_ANY_ID,
-            &event_handler,
-            NULL,
-            NULL
-        ));
-        ESP_ERROR_CHECK(esp_event_handler_instance_register(
-            IP_EVENT,
-            IP_EVENT_STA_GOT_IP,
-            &event_handler,
-            NULL,
-            NULL
-        ));
     }
+
+    //inicializar gpios
+    init_gpio();
+
+    // iniciar tarea para revisar boton de reset externo
+    xTaskCreate(clean_wifi_sta_connect_credentials, "clean_wifi_sta_connect_credentials", 2048, NULL, 10, NULL);
+
+    // Inicializar LED RGB del ESP32
+    init_led_strip();
+
+    // Variables para las credenciales
+    char ssid[32] = {0};
+    char password[64] = {0};
+
+    // Leer el estado de Wi-Fi desde NVS
+    wifi_mode_t mode = read_wifi_config_from_nvs(ssid, sizeof(ssid), password, sizeof(password));
+
+    if (mode == WIFI_MODE_STA && strlen(ssid) > 0 && strlen(password) > 0) {
+        ESP_ERROR_CHECK(esp_netif_init());
+        ESP_ERROR_CHECK(esp_event_loop_create_default());
+        habilitar_indicador_conectando = false;
+        // Si hay credenciales, iniciar en modo STA
+        wifi_init_sta(ssid, password);
+    } else {
+        // Si no hay credenciales, iniciar en modo AP
+        init_spiffs();
+        wifi_init_softap();
+        start_http_server();
+    }
+
+    // Manejar eventos de Wi-Fi
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(
+        WIFI_EVENT,
+        ESP_EVENT_ANY_ID,
+        &event_handler,
+        NULL,
+        NULL
+    ));
+    
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(
+        IP_EVENT,
+        IP_EVENT_STA_GOT_IP,
+        &event_handler,
+        NULL,
+        NULL
+    ));
+
 }
