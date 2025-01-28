@@ -24,7 +24,7 @@
 #define COLOR_RED 255,0,0
 #define COLOR_YELLOW 255,255,0
 
-#define NVS_NAMESPACE "wifi_config"
+#define NVS_WIFICONFIG "wifi_config"
 #define NVS_KEY_MODE "mode"
 #define NVS_KEY_SSID "ssid"
 #define NVS_KEY_PASSWORD "password"
@@ -36,7 +36,12 @@ static const char *TAG = "WIFI_AP";
 static led_strip_t *led_strip=NULL;
 
 bool habilitar_indicador_conectando = true;
-
+/**
+ * @brief Este es un metodo que permite inicializar los GPIOS del ESP32. hasta el
+ * momento solo se establece el GPIO 18 como entrada de pull down para poder conectar
+ * un botón que pueda restablecer el modo AP de la ESP32 en caso de algun inconveniente
+ * en el modo STA
+ */
 void init_gpio() {
     gpio_config_t io_conf = {
         .pin_bit_mask = (1ULL << BUTTON_GPIO), // Seleccionar el pin
@@ -45,67 +50,232 @@ void init_gpio() {
         .pull_down_en = GPIO_PULLDOWN_ENABLE,  // Habilitar pull-down
         .intr_type = GPIO_INTR_DISABLE         // Sin interrupciones
     };
+    //Aplicar cambios
     gpio_config(&io_conf);
 }
 
-// Función para guardar el estado en NVS
+/**
+ * @brief Esta funcion guarda configuraciones relacionadas con el modo Wi-Fi (STA 
+ * o AP) y las credenciales Wi-FI (SSID y contraseña) en la memoria no volatil NVS 
+ * del ESP32. Esto permite que la ESP32 recuerde el modo y las credenciales despues
+ * de un reinicio. los parametros son los siguientes:
+ * 
+ * @param[in] mode Especifica el modo Wifi a guardar. Pueden ser dos modos: WIFI_MODE_STA
+ * (modo estación) o WIFI_MODE_AP (modo punto de acceso).
+ * 
+ * @param[in] ssid cadena que contiene el nombre de la red Wi-Fi (SSID). Se guarda 
+ * en NVS solo si el modo es WIFI_MODE_STA.
+ * 
+ * @param[in] password cadena que contiene la contraseña de la red Wi-Fi. También se 
+ * guarda en NVS solo si el modo es WIFI_MODE_STA.
+ */
 void save_wifi_config_to_nvs(wifi_mode_t mode, const char *ssid, const char *password) {
+    
+    /**
+     * Lo siguiente es un identificador que se utiliza para interactuar con la memoria
+     * no volatil.
+     */
     nvs_handle_t nvs_handle;
-    ESP_ERROR_CHECK(nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle));
 
-    // Guardar estado
+    /**
+     * Abre el namespace definido por NVS_WIFICONFIG (en este caso "wifi_config") en
+     * modo lectura/escritura (NVS_READWRITE).
+     */
+    ESP_ERROR_CHECK(nvs_open(NVS_WIFICONFIG, NVS_READWRITE, &nvs_handle));
+
+    /**
+     * Se guarda un valor del tipo uint8_t en la clave NVS_KEY_MODE ("mode") dentro del
+     * espacio de nombres. el tercer parametro es el modo Wi-Fi actual el cual es manejado
+     * por la variable wifi_mode_t mode la cual puede tomar los siguientes valores:
+     * 
+     * - WIFI_MODE_NULL = 0 -> modo nulo 
+     * - WIFI_MODE_STA = 1 -> modo estación
+     * - WIFI_MODE_AP = 2 -> modo punto de acceso
+     * - WIFI_MODE_APSTA = 3 -> modo estación + punto de acceso
+     * - WIFI_MODE_NAN = 4 -> modo NAN
+     * - WIFI_MODE_MAX = 5 -> modo maximo
+     * 
+     * Sin embargo para este caso unicamente se manejan los valores 1 y 2.
+     */
     ESP_ERROR_CHECK(nvs_set_u8(nvs_handle, NVS_KEY_MODE, mode));
 
-    // Guardar SSID y contraseña si el modo es STA
+    /**
+     * Verifica si el modo es WIFI_MODE_STA y si las cadenas ssid y password no son
+     * NULL guarda las cadenas en las claves correspondientes de NVS
+     */
     if (mode == WIFI_MODE_STA && ssid && password) {
         ESP_ERROR_CHECK(nvs_set_str(nvs_handle, NVS_KEY_SSID, ssid));
         ESP_ERROR_CHECK(nvs_set_str(nvs_handle, NVS_KEY_PASSWORD, password));
     }
 
-    // Confirmar cambios
+    /**
+     * Se confirman los cambios en la memoria flash
+     */
     ESP_ERROR_CHECK(nvs_commit(nvs_handle));
+
+    /**
+     * Se cierra el espacio de nombres
+     */
     nvs_close(nvs_handle);
 }
 
-// Función para leer el estado desde NVS
+/**
+ * @brief La siguiente función permite leer de la memoria no volatil (NVS) el modo
+ * Wi-Fi, así como el SSID y la contreseña si el dispositivo está configurado en modo
+ * estación (STA).
+ * 
+ * @param[in] ssid Puntero a una cadena donde se almacenará el SSID leído desde la 
+ * NVS. Se pasa vacío desde el programa principal y se llena con el valor almacenado.
+ * @param[in] ssid_len Tamaño maximo del buffer donde se guardará el SSID.
+ * @param[in] password Puntero a una cadena donde se almacenará la contraseña leída 
+ * desde la NVS.
+ * @param[in] password_len Tamaño máximo del buffer donde se guardará la contraseña
+ * 
+ * @return Devuelve el modo Wi-Fi almacenado en NVS (WIFI_MODE_AP o WIFI_MODE_STA). Si el
+ * modo es WIFI_MODE_STA, también rellena las variables ssid y password con las credenciales
+ * de la red Wi-Fi previamente guardadas. 
+ */
 wifi_mode_t read_wifi_config_from_nvs(char *ssid, size_t ssid_len, char *password, size_t password_len) {
+    // se declara el identificador para interactuar con NVS
     nvs_handle_t nvs_handle;
-    wifi_mode_t mode = WIFI_MODE_AP; // Modo predeterminado
 
-    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs_handle) == ESP_OK) {
-        // Leer estado
+    /**
+     * Inicializa mode como WIFI_MODE_AP. Esto asegura que, en caso de fallo al leer
+     * desde NVS, el dispositivo inicie en modo Acces Point (AP).
+     */
+    wifi_mode_t mode = WIFI_MODE_AP;
+
+    /**
+     * Se intenta abrir el namespace NVS_WIFICONFIG en modo solo lectura (NVS_READONLY).
+     * Si ocurre un error (por ejemplo, el namespace no existe), la función continúa sin
+     * intentar leer.
+     */
+    if (nvs_open(NVS_WIFICONFIG, NVS_READONLY, &nvs_handle) == ESP_OK) {
         uint8_t stored_mode;
+        /**
+         * nvs_get_u8 lee un valor tipo uint8_t asociado a la clave NVS_KEY_MODE. Si
+         * la lectura es exitosa, el valor leído (stored_mode) se convierte a wifi_mode_t
+         * y se almacena en mode.
+         */
         if (nvs_get_u8(nvs_handle, NVS_KEY_MODE, &stored_mode) == ESP_OK) {
             mode = (wifi_mode_t)stored_mode;
         }
 
-        // Leer SSID y contraseña si el modo es STA
+        /**
+         * Si el modo leido es WIFI_MODE_STA se lee la cadena asociada a NVS_KEY_SSID con
+         * la funcion nvs_get_str() y la almacena en el buffer ssid. el tamaño del buffer debe
+         * especificarse mediante ssid_len. Lo mismo ocurre para la contraseña (NVS_KEY_PASSWORD)
+         * y el buffer password.
+         */
         if (mode == WIFI_MODE_STA) {
             nvs_get_str(nvs_handle, NVS_KEY_SSID, ssid, &ssid_len);
             nvs_get_str(nvs_handle, NVS_KEY_PASSWORD, password, &password_len);
         }
 
+        /**
+         * Finalmente se cierra la memoria no volatil.
+         */
         nvs_close(nvs_handle);
     }
 
+    /**
+     * Se devuelve el modo Wi-Fi que se leyó desde la NVS. Si no se pudo leer nada, devolverá
+     * WIFI_MODE_AP como valor predeterminado.
+     */
     return mode;
 }
 
+/**
+ * @brief La función init_led_strip inicializa el controlador para manejar un LED RGB basado en 
+ * tiras LED WS2812B. En este caso unicamente se dispone de un LED integrado en la ESP32.
+ * 
+ * Esta función tambien asegura que el LED comience apagado.
+ */
 void init_led_strip(void){
+    /**
+     * La función led_strip_init permite inicializar el controlador LED. Este tiene
+     * los siguientes parametros:
+     * 
+     * @param[in] channel Especifica el canal RMT (Remote Control) que usará el ESP32
+     * para controlar las señales del LED. En este caso, el canal 0 se asigna al 
+     * controlador. Es importante aclarar que el canal RMT es un periferico especializado
+     * del ESP32 diseñado para manejar señales temporales precisas, como las que utilizan
+     * en protocolos de comunicación con temporización estricta. es especialmente util
+     * para generar y recibir señales moduladas con precisión.
+     * 
+     * La ESP32-C6-DevKitC-1 tiene en total 4 canales:
+     * 
+     * (canales 0-1) canales TX o de transmision.
+     * (canales 2-3) canales RX o de recepción.
+     * 
+     * @param[in] gpio Especifica el número del pin GPIO al que está conectado el LED 
+     * o la tira LED. en este caso se usa el GPIO 8 al cual esta conectado el WS2812B.
+     * 
+     * @param[in] led_num indica el numero de LEDs que se controlarán en la tira. en 
+     * este caso se establece en 1 ya que solo se manejará un solo led.
+     * 
+     * @return La funcion devuelve un puntero a una estructura led_strip_t que
+     * representa el controlador del LED. Si la inicialización falla devuelve NULL.
+     */
     led_strip = led_strip_init(0, GPIO_WS2812B, MAX_LEDS);
+
+    /**
+     * Si la inicialización del led falla se imprime un mensaje de error y se sale de 
+     * la función usando return.
+     */
     if (!led_strip)
     {
         ESP_LOGE(TAG, "Fallo al inicializar el LED RGB");
         return;
     }
 
+    /**
+     * Se apaga el LED configurandolo en color negro (0,0,0). Esta función toma como 
+     * parametros:
+     * 
+     * @param[in] led_strip El controlador inicializado en pasos anteriores.
+     * @param[in] timeout_ms Tiempo maximo de espera en milisegundos para realizar la accion.
+     * en este caso se establece en 100ms para evitar que se dejen de ejecutar las 
+     * otras tareas que esta realizando el ESP32 si ocurre un daño en el LED.
+     * 
+     * @note hay que tener en cuenta que la sintaxis -> indica que se esta dereferenciando
+     * un puntero a una estructura y accediendo a la función clear() de esa estructura.
+     */
     ESP_ERROR_CHECK(led_strip->clear(led_strip, 100));
 }
 
+/**
+ * @brief Esta función establece el estado de color del LED RGB integrado en el ESP32
+ * 
+ * @param[in] red Intensidad del color rojo (0->255).
+ * @param[in] green Intensidad del color verde (0->255).
+ * @param[in] blue Intensidad del color azul (0->255).
+ */
 void set_led_color(uint8_t red, uint8_t green, uint8_t blue){
+    /**
+     * Si se ha inicializado correctamente el LED se establece el color del LED
+     */
     if (led_strip)
     {
+        /**
+         * La funcion set_pixel permite establecer el color del pixel. esta tiene 
+         * los siguientes parametros:
+         * 
+         * @param[in] strip la estructura que contiene la inicialización del LED
+         * @param[in] index el indice del LED al cual se le va a cambiar el color.
+         * en este caso como solo se esta usando el LED de la ESP32 este indice es
+         * el del primer LED, es decir, 0.
+         * @param[in] red Intensidad del color rojo (0->255).
+         * @param[in] green Intensidad del color verde (0->255).
+         * @param[in] blue Intensidad del color azul (0->255).
+         */
         ESP_ERROR_CHECK(led_strip->set_pixel(led_strip,0,red,green,blue));
+        /**
+         * Se actualiza el estado del LED RGB con las configuraciones creadas. se
+         * establece un timeout de 100ms para evitar que el ESP32 se quede ejecutando
+         * la tarea de actualizar led si ocurre un error. esto es importante para 
+         * evitar que el servidor se caiga en caso de que ocurra un daño en el LED.
+         */
         ESP_ERROR_CHECK(led_strip->refresh(led_strip, 100));
     }
     
@@ -333,74 +503,236 @@ esp_err_t root_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
+/**
+ * @brief Este es un manejador de eventos llamado event_handler que se encarga de 
+ * procesar eventos relacionados con Wi-Fi e IP. Este tipo de función es fundamental
+ * para controlar el flujo de trabajo en la ESP32 respondiendo a cambios de estado
+ * de red. Este manejador tiene los siguientes parametros:
+ * 
+ * @param[in] arg un puntero generico que se puede usar para pasar datos personalizados
+ * al manejador. En este caso no se usa explicitamente
+ * @param[in] event_base se especifica la categoria del evento. Los valores mas comunes
+ * son WIFI_EVENT (relacionados con Wi-Fi) e IP_EVENT (relacionados con la red IP)
+ * @param[in] event_id Identifica el tipo especifico de evento dentro de la categoria
+ * indicada por event_base. Por ejemplo, para WIFI_EVENT, los IDs pueden ser
+ * WIFI_EVENT_START, WIFI_EVENT_DISCONNECTED, etc...
+ * @param[in] event_data Puntero a una estructura que contiene datos adicionales
+ * relacionados con el evento. Por ejemplo, en el caso de IP_EVENT_STA_GOT_IP, contiene
+ * información de la direccion IP obtenida. 
+ */
 static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
+    /**
+     * El siguiente evento ocurre cuando el Wi-Fi en modo STA ha iniciado y esta listo
+     * para conectarse a una red
+     */
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+        /**
+         * Muestra un mensaje en el log: "Wi-Fi STA iniciado, conectando ..."
+         */
         ESP_LOGI(TAG, "Wi-Fi STA iniciado, conectando...");
+
+        /**
+         * Si habilitar_indicador_conectando es verdadero cambia el color del led RGB
+         * a amarillo (COLOR_YELLOW) indicando que el dispositivo esta intentando 
+         * conectarse.
+         */
         if (habilitar_indicador_conectando)
         {
             set_led_color(COLOR_YELLOW);
         }
+
+        /**
+         * La función esp_wifi_connect() inicia el proceso de conexion Wi-Fi.
+         */
         esp_wifi_connect(); // Iniciar la conexión
-    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+    }
+    /**
+     * Este evento ocurre cuando el dispositivo pierde la conexión Wi-Fi o no puede
+     * conectarse a la red especificada.
+     */ 
+    else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        /**
+         * Registra una advertencia en el LOG con un mensaje que indica "Conexión 
+         * conexion fallida, intentando reconectar..."
+         */
         ESP_LOGW(TAG, "Conexión fallida, intentando reconectar...");
+
+        /**
+         * Se llama nuevamente a esp_wifi_connect() para reintentar la conexión.
+         */
         esp_wifi_connect(); // Reintentar conexión
+
+        /**
+         * Se cambia el color del LED RGB a rojo (COLOR RED), indicando que la conexion
+         * ha fallado.
+         */
         set_led_color(COLOR_RED);
-    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+    } 
+    /**
+     * Este evento ocurre cuando el dispositivo ha obtenido una dirección IP valida del
+     * router después de conectarse exitosamente.
+     */
+    else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+        /**
+         * Convierte event_data a un puntero del tipo ip_event_got_ip_t para acceder a
+         * los datos relacionados con la IP obtenida. 
+         */
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
+
+        /**
+         * Cuando el ESP32 obtiene una dirección IP valida (por ejemplo a traves de DHCP
+         * en modo estación), esta dirección esta almacenada en una estructura especial.
+         * Para mostrar esta dirección IP como una cadena legible (x.x.x.x), se necesita
+         * convertirla desde su formato binario a uno textual. aqui es donde entran las
+         * macros IPSTR y IP2STR:
+         * 
+         * IPSTR se traduce a: "%d.%d.%d.%d". esto significa que espera cuatro valores
+         * enteros, uno por cada octeto.arg
+         * IP2STR es  otra macro que convierte una direccion IP almacenada en formato
+         * binario (tipo ip4_addr_t) en 4 enteros separados, uno por cada octeto.
+         * Finalmente, event->ip_info.ip es el dato que se quiere rescatar. este se compone
+         * de la siguiente forma:arg
+         * event -- es un puntero al dato del evento recibido (ip_event_got_ip)
+         * event->ip_info -- es una estructura que contiene información sobre la conexón IP.
+         * event->ip_info.ip es la direccion IP obtenida en formato binario
+         * 
+         */
         ESP_LOGI(TAG, "Conexión exitosa, dirección IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        
+        /**
+         * Se establece el led RGB de color verde para indicar que la conexion fue exitosa
+         */
         set_led_color(COLOR_LIGHT_GREEN);
     }
 }
 
-
+/**
+ * @brief La función wifi_init_sta configura el ESP32 para operar en modo estación y conectarse
+ * a una red Wi-Fi específica utilizando un SSID y una contraseña proporcionados como 
+ * parámetros. Además gestiona la reconexión automatica y actualiza el estado del LED RGB
+ * para reflejar el progreso o errores en el proceso de conexión.
+ * 
+ * @param[in] ssid el nombre de la red Wi-Fi a la que se conectará el ESP32
+ * @param[in] password la contraseña de la red WiFi
+ */
 void wifi_init_sta(const char *ssid, const char *password) {
+    /**
+     * Se imprime el LOG "Inicializando Wi-Fi en modo STA..." a traves del monitor serie.
+     */
     ESP_LOGI(TAG, "Inicializando Wi-Fi en modo STA...");
 
-    // Verificar si el Wi-Fi ya está inicializado
+    /**
+     * Se declara la variable que almacenará el modo actual del Wi-Fi (AP o STA).
+     */
     wifi_mode_t current_mode;
+    /**
+     * Con la funcion esp_wifi_get_mode() se obtiene el modo actual del Wi-Fi. esta funcion
+     * tiene como parametro la direccion de la memoria donde se almacenará el estado del Wi-Fi.current_mode
+     * Si la operación tiene exito devuelve ESP_OK.
+     * 
+     * Luego se evalua si el Wi-Fi esta en un modo distinto al de estación. En tal caso se detiene
+     * la tarea de ejecucion del Wi-Fi para poder iniciar correctamente el modo estación.
+     */
     if (esp_wifi_get_mode(&current_mode) == ESP_OK && current_mode != WIFI_MODE_STA) {
         ESP_ERROR_CHECK(esp_wifi_stop());
     }
 
-    // Crear interfaces STA solo si no existen
+
+    /**
+     * Se declara un puntero estatico a la interfaz de red Wi-Fi en modo STA. es necesario
+     * colocarla como static para que la interfaz solo se cree una vez durante la vida del
+     * programa, de lo contrario esta interfaz se asignaria en NULL todas las veces que fuese
+     * invocada y esto puede causar problemas para conectarse
+     */
     static esp_netif_t *sta_netif = NULL;
+
+    /**
+     * Si la interfaz de red no existe, esta se inicializa mediante la función 
+     * esp_netif_creat_default_wifi_sta()
+     */
     if (!sta_netif) {
         sta_netif = esp_netif_create_default_wifi_sta();
         if (!sta_netif) {
+            /**
+             * En caso de no haberse inicializado la interfaz de red se imprime "error al 
+             * crear la interfaz STA" y se termina la función con return.
+             */
             ESP_LOGE(TAG, "Error al crear la interfaz STA");
             return;
         }
     }
 
+    /**
+     * Se declara la estructura wifi_init_config_t con valores predeterminados.
+     */
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    /**
+     * La función esp_wifi_init() inicializa el controlador Wi-Fi con la configuración
+     * especificada.
+     */
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
+    /**
+     * Se declara la estructura que almacena la configuración de Wi-Fi inicializandola 
+     * con campos vacios.
+     */
     wifi_config_t wifi_config = {
         .sta = {
             .ssid = "",
             .password = "",
         },
     };
+
+    /**
+     * Se asigna los valores del ssid y password mediante la funcion strncpy. esta
+     * tiene 3 parametros:
+     * 
+     * 1. Puntero al destino donde se copiara la cadena de caracteres
+     * 2. cadena de caracteres que se va a copiar
+     * 3. numero maximo de caracteres a copiar. para el caso de ssid es 32 caracteres
+     * mientras que para el caso de password es 64 caracteres.
+     */
     strncpy((char *)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid));
     strncpy((char *)wifi_config.sta.password, password, sizeof(wifi_config.sta.password));
 
+    // Se establece el Wi-Fi en modo estación
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    // Se aplica la configuración del SSID y la contraseña al controlador Wi-Fi
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+    // Se inicia el modulo Wi-Fi en modo STA
     ESP_ERROR_CHECK(esp_wifi_start());
 
 
-    
+    // Se imprime en el LOG el ssid al que se intentará conectar el ESP32
     ESP_LOGI(TAG, "Conectándose a SSID: %s", ssid);
 
-    // Intentar conexión
+    /**
+     * Se inicia el proceso de conexion al punto de acceso Wi-Fi especificado.
+     * en caso que el proceso sea exitoso la función esp_wifi_connect() devuelve
+     * ESP_OK.  
+     */ 
     esp_err_t ret = esp_wifi_connect();
+ 
+    /**
+     * Se evalua el estado de la conexión
+     */
     if (ret != ESP_OK) {
+
+        /**
+         * en caso de no haber sido exitosa la conexión, se establece el led indicador
+         * en color ROJO (COLOR_RED) y se imprime el error en el monitor serial.
+         */
         if (!habilitar_indicador_conectando)
         {
             set_led_color(COLOR_RED);
         }
         ESP_LOGE(TAG, "Error al intentar conectarse: %s", esp_err_to_name(ret));
     } else {
+
+        /**
+         * en caso que la conexión sea exitosa se establece el led indicador en color
+         * verde y se imprime en monitor serial "conectado a la red" 
+         */
         if (!habilitar_indicador_conectando)
         {
             set_led_color(COLOR_LIGHT_GREEN);
@@ -410,39 +742,149 @@ void wifi_init_sta(const char *ssid, const char *password) {
     }
 }
 
+/**
+ * @brief Esta función se usa para decodificar cadenas codificadas en formato URL encoding.
+ * El URL encoding es un esquema en el que ciertos caracteres especiales se 
+ * representan como %XX, donde XX es el valor hexadecimal del caracter.
+ * 
+ * Una de las funciones es reemplazar + por un espacio. otra es reemplazar %XX por
+ * el caracter correspondiente al codigo hexadecimal.
+ * 
+ * @param[in] src cadena de entrada codificada en URL encoding
+ * @param[out] dest Buffer de salida donde se almacenará la cadena decodificada
+ * @param[in] dest_size Tamaño maximo del buffer dest. se usa para evitar desbordamiento
+ * de memoria.
+ * 
+ * 
+ */
 void url_decode(char *src, char *dest, size_t dest_size) {
+    /**
+     * Se apunta al final de la cadena src. esto permite iterar hasta el final de
+     * la cadena de entrada. para entender porque sumar src + el tamaño de la cadena
+     * retorna la posicion final de src es necesario entender como se maneja internamente
+     * las cadenas de caracteres en la memoria del ESP32. se recomienda revisar la 
+     * documentacion al respecto: [colocar enlace de explicación] 
+     */
     char *end = src + strlen(src);
+    /**
+     * Se apunta al inicio del buffer de destino
+     */
     char *d = dest;
-    char *d_end = dest + dest_size - 1; // Deja espacio para el terminador nulo
+    /**
+     * Se apunta al ultimo espacio valido en el buffer dest, dejando espacio para el 
+     * terminador nulo \0
+     */
+    char *d_end = dest + dest_size - 1;
 
+    /**
+     * Mientras  no se alcance el final de la cadena de entrada (src < end) y no se
+     * llene el buffer de destino (d < d_end)
+     */
     while (src < end && d < d_end) {
+        /**
+         * Sí el caracter es equivalente a + se reemplaza con un espacio
+         */
         if (*src == '+') {
-            *d++ = ' '; // Reemplaza '+' con espacio
-        } else if (*src == '%' && src + 2 < end) {
-            // Decodifica caracteres codificados en %XX
+            *d++ = ' '; 
+        } 
+        /**
+         * Sí el caracter es igual a % y 2 posiciones mas alante no se encuentra
+         * el final de la cadena de entrada se convierte el caracter a su valor 
+         * decimal correspondiente , escribiendolo en el buffer destino.
+         */
+        else if (*src == '%' && src + 2 < end) {
+            /**
+             * Se extraen los dos caracteres siguientes en la cadena hex de 3 bytes 
+             * agregando el caracter \0 para asegurar que hex sea una cadena valida
+             * para las funciones de conversión.
+             */
             char hex[3] = { *(src + 1), *(src + 2), '\0' };
+            /**
+             * la función strtol() interpreta hex como un numero en base 16 y lo
+             * convierte a su valir decimal correspondiente. este valor se escribe 
+             * en el buffer destino.
+             * 
+             * Para entender esto mejor debe saber que las cadenas de caracteres
+             * manejan codigo ASCII que asocia numeros en base 10 a las letras, 
+             * simbolos, signos de puntuacion, caracteres especiales, etc...
+             * 
+             * por ejemplo si del navegador llega el codigo %20 se convierte el
+             * numero 20 en hexadecimal a su correspondiente decimal (32) el cual
+             * a su vez corresponde a un espacio en codigo ASCII.
+             */
             *d++ = (char)strtol(hex, NULL, 16);
+            /**
+             * Se incrementa src en 2 posiciones.
+             */
             src += 2;
-        } else {
+        } 
+        /**
+         * Si el caracter actual no es ni + ni % simplemente se copia al buffer
+         * destino sin modificaciones.
+         */
+        else {
             *d++ = *src;
         }
+        /**
+         * se incrementa una posicion de la cadena de caracteres
+         */
         src++;
     }
-    *d = '\0'; // Termina la cadena
+    *d = '\0'; // Termina la cadena con el caracter nulo
 }
 
 
-/*
-la siguiente funcion es un manejador para procesar los datos enviados
-desde un formulario web y poder configurar la ESP32 como un access point
-*/ 
+/**
+ * @brief Este es un manejador HTTP que procesa una solicitud enviada desde un formulario
+ * web al servidor alojado en la ESP32. Su proposito principale es extraer las credenciales
+ * Wi-Fi (SSID y contraseña) del formulario, decodificarlas, almacenarlas en la memoria no
+ * volatil (NVS) y cambiar la ESP32 al modo estación (STA) para conectarse a una red Wi-Fi
+ * 
+ * @param[in] req puntero a la estructura httpd_req_t que representa la solicitud HTTP
+ * recibida. Esta estructura contiene informacion relevante como los parametros enviados
+ * desde el formulario web.
+ * 
+ * @return Devuelve un codigo de error o éxito. ESP_OK indica que la función se ejecutó
+ * correctamente.
+ */
 esp_err_t submit_handler(httpd_req_t *req) {
+    // se declara un buffer de 100 bytes para extraer la cadena de consulta de la URL
     char param[100];
+    /**
+     * La función httpd_req_get_url_query_str() permite recibir el query como una cadena
+     * de caracteres. tiene como parametros:
+     * 
+     * 1- estructura de la solicitud http recibida.
+     * 2- buffer donde se almacenará la cadena de caracteres, en este caso es la variable
+     * param.
+     * 3- tamaño del buffer donde se almacenará ña cadena de caracteres.
+     * 
+     * Si la función se ejecuta correctamente devuelve ESP_OK lo que significa que hay datos
+     * que procesar. por el contrario se debe devolver un mensaje de error al cliente.
+     */
     if (httpd_req_get_url_query_str(req, param, sizeof(param)) == ESP_OK) {
+        /**
+         * Los buffers ssid_encoded y password_encoded sirven para almacenar el SSID y la
+         * contraseña tal como se reciben en formato codificado (URL encoding)
+         */
         char ssid_encoded[50];
         char password_encoded[50];
+        /**
+         * Los buffers ssid y password se usan para almacenar los valores decodificados
+         * despues de eliminar el URL encoding
+         */
         char ssid[50];
         char password[50];
+
+        /**
+         * Se buscan los parametros especificos en la cadena param y se almacenan sus 
+         * valores en los buffers ssid_encoded y password_encoded. la condicion indica que
+         * deben recibirse ambos parametros para entrar en "verdadero".
+         * 
+         * Es importante aclarar que la función httpd_query_key_value permite buscar 
+         * en la cadena de consulta el parametro especificado y almacenarlo en un buffer 
+         * para su posterior uso. Si la operación es correcta devuelve ESP_OK.
+         */
 
         if (httpd_query_key_value(param, "SSID", ssid_encoded, sizeof(ssid_encoded)) == ESP_OK &&
             httpd_query_key_value(param, "PASSWORD", password_encoded, sizeof(password_encoded)) == ESP_OK) {
@@ -451,6 +893,7 @@ esp_err_t submit_handler(httpd_req_t *req) {
             url_decode(ssid_encoded, ssid, sizeof(ssid));
             url_decode(password_encoded, password, sizeof(password));
 
+            // Se imprimen las credenciales decodificadas en el monitor serial
             ESP_LOGI(TAG, "SSID Decodificado: %s", ssid);
             ESP_LOGI(TAG, "PASSWORD Decodificado: %s", password);
 
@@ -461,6 +904,7 @@ esp_err_t submit_handler(httpd_req_t *req) {
             ESP_LOGI(TAG, "Modo AP detenido. Cambiando a modo STA...");
             wifi_init_sta(ssid, password);
 
+            // Se envia el mensaje "conectandose a la red especificada" al cliente.
             httpd_resp_sendstr(req, "Conectándose a la red especificada...");
         } else {
             httpd_resp_sendstr(req, "Error al procesar los datos del formulario.");
@@ -468,9 +912,11 @@ esp_err_t submit_handler(httpd_req_t *req) {
     } else {
         httpd_resp_sendstr(req, "Error: No se recibieron parámetros.");
     }
+    /**
+     * Se retorna ESP_OK si la operacion es exitosa.
+     */
     return ESP_OK;
 }
-
 
 /*
 El siguiente es un manejador para solicitudes HTTP que no coinciden
@@ -618,14 +1064,45 @@ void start_http_server(void) {
  */
 void wifi_init_softap(void) {
     ESP_LOGI(TAG, "Inicializando Wi-Fi en modo AP...");
+    /**
+     * Se activa el indicador "conectando", esto permite que el LED RGB indique
+     * cuando el ESP32 esta cambiando de modo AP a modo STA
+     */
     habilitar_indicador_conectando = true;
+
+    //Se inicializa el TCPIP stack
     ESP_ERROR_CHECK(esp_netif_init());
+    
+    // Se crea el bucle de eventos por defecto
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+
+    // Se crea la interfaz AP
     esp_netif_create_default_wifi_ap();
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+
+    /*
+     * Se inicializa el wifi con la estructura por defecto. hay que tener
+     * en cuenta que la funcion esp_wifi_init() espera un puntero por lo
+     * cual hay que agregar & a la estructura cfg de la configuracion.
+     * 
+     * la inicializacion activa los recursos del driver del wifi como la
+     * estructura de control de wifi, el buffer de transmision y recepcion,
+     * la estructura NVS del wifi, etc... esto tambien inicializa la tarea
+     * de Wi-Fi.
+     * 
+     * es importante destacar dos cosas:
+     * 
+     * 1. Esta API debe ser llamada antes de que otras API Wi-Fi sean llamadas
+     * 
+     * 2. Es bueno usar WIFI_INIT_CONFIG_DEFAULT para inicializar la configuracion
+     *    de valores por defecto. esto garantiza que todos los campos tengan un
+     *    valor correcto antes de que mas campos sean añadidos al wifi_init_config_t
+     *    en futuras sentencias.
+     */
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
+    //configuración de AP
     wifi_config_t wifi_config = {
         .ap = {
             .ssid = AP_SSID,
@@ -636,54 +1113,125 @@ void wifi_init_softap(void) {
             .authmode = WIFI_AUTH_WPA_WPA2_PSK,
         },
     };
+
+    /**
+     * Si la contraeña del wifi tiene un tamaño de 0 se establece como una
+     * red abierta.
+     */
     if (strlen(AP_PASSWORD) == 0) {
         wifi_config.ap.authmode = WIFI_AUTH_OPEN;
     }
 
+    // Se establece el modo AP
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+
+    // Se establece la configuracion del wifi si el dispositivo esta en modo AP
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
+
+    // Se inicia el Wi-Fi
     ESP_ERROR_CHECK(esp_wifi_start());
 
+    // Se enciende el LED RGB en color Cyan indicando que el ESP32 está en modo AP
     set_led_color(COLOR_CYAN);
 
+    // Se imprime el SSID y la contraseña de la red en el monitor serial.
     ESP_LOGI(TAG, "Modo AP iniciado con SSID: %s, Contraseña: %s", AP_SSID, AP_PASSWORD);
 }
 
+/**
+ * @brief Esta fuunción define una tarea que monitorea un boton conectado al GPIO 18 de la ESP32
+ * y realiza una acción especifica si el botón es mantenido presionado durante un tiempo prolongado
+ * (en este caso 10 segundos).
+ * 
+ * La accion consiste en borrar las credenciales Wi-Fi almacenadas en la memoria no volatil (NVS),
+ * reinicializarla y volcer a configurar el dispositivo en modo Access Point
+ */
 void clean_wifi_sta_connect_credentials(void *param) {
-    uint64_t press_start_time = 0;  // Tiempo en que el botón fue presionado
+    /**
+     * Esta variable almacena el momento en que el botón fue presionado, en milisegundos. Sí es 
+     * 0 significa que el botón no está siendo presionaado actualmente.
+     */
+    uint64_t press_start_time = 0;
+
+    /**
+     * Esta variable indica si el botón ha sido mantenido presionado durante mas de un tiempo
+     * específico (HOLD_TIME_MS). Esto asegura que la acción de borrar la memoria NVS se realice
+     * solo una vez mientras el botón está presionado.
+     */  
     bool button_held = false;       // Estado del botón (si fue mantenido por más de 10 segundos)
 
-    while (1) {
-        // Leer el estado del botón
+    //bucle
+
+    /**
+     * El bucle tiene un retardo de 10 ms entre cada iteración para reducir el consumo de CPU.
+     */
+    while (1) { 
+        // Leer el estado del botón. 1 si el botón está presionado, 0 si no está presionado.
         int button_state = gpio_get_level(BUTTON_GPIO);
 
-        if (button_state == 1) {  // Botón presionado
+        /**
+         * Se evalua si el botón es presionado
+         */
+        if (button_state == 1) {  
+            /**
+             * en el caso de ser presionado, si es la primera vez que se detecta la presión
+             * (press_start_time == 0) se registra el tiempo actual (en milisegundos) usando 
+             * esp_timer_get_time(), que retorna el tiempo en microsegundos desde que el ESP32
+             * arrancó (similar a millis() en arduino pero en microsegundos)
+             */
             if (press_start_time == 0) {
                 // Registrar el momento en que se presionó el botón
                 press_start_time = esp_timer_get_time() / 1000; // Tiempo actual en ms
-            } else {
-                // Calcular cuánto tiempo ha estado presionado
+            } 
+            /**
+             * En caso que no sea la primera vez que se detecta la presión
+             */
+            else {
+                /**
+                 * Se calcula cuanto tiempo ha transcurrido desde que se presionó el botón 
+                 */
                 uint64_t elapsed_time = (esp_timer_get_time() / 1000) - press_start_time;
+                /**
+                 * Se evalua si el tiempo transcurrido es mayor o igual a HOLD_TIME_MS (en este
+                 * caso 10000ms) y si la acción no se ha realizado aún (!button_held)
+                 */
                 if (elapsed_time >= HOLD_TIME_MS && !button_held) {
-                    button_held = true; // Marcamos que el botón fue mantenido
+                    
+                    //En caso verdadero se marca el botón como "mantenido" (button_held=true)
+                    button_held = true;
+
+                    //Se imprime el mensaje "borrando toda la memoria NVS" en el monitor serie
                     ESP_LOGI(TAG, "Borrando toda la memoria NVS...");
+
+                    // se borra la memoria NVS
                     ESP_ERROR_CHECK(nvs_flash_erase());
+
+                    // Se vuelve a inicializar la memoria NVS
                     ESP_ERROR_CHECK(nvs_flash_init());
+
+                    // Se imprime el mensaje "memoria NVS borrada y reinicializada" en el monitor
+                    // serie.
                     ESP_LOGI(TAG, "Memoria NVS borrada y reinicializada.");
+
+                    // Se coloca la ESP32 en modo AP
                     wifi_init_softap();
+
+                    // Se conecta el servidor http
                     start_http_server();
                 }
             }
-        } else {  // Botón no presionado
+        /**
+         * Si el botón no es presionado o se suelta
+         */
+        } else {  
             press_start_time = 0; // Reiniciar el tiempo de inicio
             button_held = false;  // Reiniciar el estado del botón mantenido
         }
 
-        vTaskDelay(10 / portTICK_PERIOD_MS); // Pequeña espera para reducir consumo de CPU
+        // Espera 10ms para reducir el consumo de CPU
+        vTaskDelay(10 / portTICK_PERIOD_MS); 
     }
 }
-
-// Modifica la función app_main para usar estas funciones
 void app_main(void) {
 
     esp_err_t ret = nvs_flash_init();
