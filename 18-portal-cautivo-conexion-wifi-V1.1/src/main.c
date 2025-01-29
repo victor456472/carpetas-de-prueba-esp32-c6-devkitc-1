@@ -35,7 +35,6 @@
 static const char *TAG = "WIFI_AP";
 static led_strip_t *led_strip=NULL;
 
-bool habilitar_indicador_conectando = true;
 /**
  * @brief Este es un metodo que permite inicializar los GPIOS del ESP32. hasta el
  * momento solo se establece el GPIO 18 como entrada de pull down para poder conectar
@@ -531,16 +530,7 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
          */
         ESP_LOGI(TAG, "Wi-Fi STA iniciado, conectando...");
 
-        /**
-         * Si habilitar_indicador_conectando es verdadero cambia el color del led RGB
-         * a amarillo (COLOR_YELLOW) indicando que el dispositivo esta intentando 
-         * conectarse.
-         */
-        if (habilitar_indicador_conectando)
-        {
-            set_led_color(COLOR_YELLOW);
-        }
-
+        set_led_color(COLOR_YELLOW);
         /**
          * La función esp_wifi_connect() inicia el proceso de conexion Wi-Fi.
          */
@@ -603,6 +593,8 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
          * Se establece el led RGB de color verde para indicar que la conexion fue exitosa
          */
         set_led_color(COLOR_LIGHT_GREEN);
+        ESP_LOGI(TAG, "Habilitando ahorro de energía Wi-Fi...");
+        ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MIN_MODEM));
     }
 }
 
@@ -711,6 +703,7 @@ void wifi_init_sta(const char *ssid, const char *password) {
      * en caso que el proceso sea exitoso la función esp_wifi_connect() devuelve
      * ESP_OK.  
      */ 
+    set_led_color(COLOR_YELLOW);
     esp_err_t ret = esp_wifi_connect();
  
     /**
@@ -722,10 +715,8 @@ void wifi_init_sta(const char *ssid, const char *password) {
          * en caso de no haber sido exitosa la conexión, se establece el led indicador
          * en color ROJO (COLOR_RED) y se imprime el error en el monitor serial.
          */
-        if (!habilitar_indicador_conectando)
-        {
-            set_led_color(COLOR_RED);
-        }
+
+        set_led_color(COLOR_RED);
         ESP_LOGE(TAG, "Error al intentar conectarse: %s", esp_err_to_name(ret));
     } else {
 
@@ -733,10 +724,6 @@ void wifi_init_sta(const char *ssid, const char *password) {
          * en caso que la conexión sea exitosa se establece el led indicador en color
          * verde y se imprime en monitor serial "conectado a la red" 
          */
-        if (!habilitar_indicador_conectando)
-        {
-            set_led_color(COLOR_LIGHT_GREEN);
-        }
         
         ESP_LOGI(TAG, "Conectado a la red");
     }
@@ -857,6 +844,8 @@ esp_err_t script_handler(httpd_req_t *req) {
 }
 
 esp_err_t scan_handler(httpd_req_t *req) {
+
+
 
     ESP_LOGI("WIFI_SCAN", "Ejecutando escaneo de redes...");
 
@@ -1152,7 +1141,6 @@ void wifi_init_softap(void) {
      * Se activa el indicador "conectando", esto permite que el LED RGB indique
      * cuando el ESP32 esta cambiando de modo AP a modo STA
      */
-    habilitar_indicador_conectando = true;
 
     //Se inicializa el TCPIP stack
     ESP_ERROR_CHECK(esp_netif_init());
@@ -1217,7 +1205,7 @@ void wifi_init_softap(void) {
     ESP_ERROR_CHECK(esp_wifi_start());
 
     // Deshabilitar el ahorro de energía para un escaneo más preciso
-    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+    //ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
 
     wifi_mode_t current_mode;
     esp_wifi_get_mode(&current_mode);
@@ -1307,7 +1295,8 @@ void clean_wifi_sta_connect_credentials(void *param) {
 
                     // Se coloca la ESP32 en modo AP
                     wifi_init_softap();
-
+                    // deshabilitar ahorro de batería
+                    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
                     // Se conecta el servidor http
                     start_http_server();
                 }
@@ -1351,13 +1340,14 @@ void app_main(void) {
     if (mode == WIFI_MODE_STA && strlen(ssid) > 0 && strlen(password) > 0) {
         ESP_ERROR_CHECK(esp_netif_init());
         ESP_ERROR_CHECK(esp_event_loop_create_default());
-        habilitar_indicador_conectando = false;
         // Si hay credenciales, iniciar en modo STA
         wifi_init_sta(ssid, password);
     } else {
         // Si no hay credenciales, iniciar en modo AP
         init_spiffs();
         wifi_init_softap();
+        // Deshabilitar el ahorro de energía para un escaneo más preciso
+        ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
         start_http_server();
     }
 
