@@ -870,7 +870,14 @@ esp_err_t scan_handler(httpd_req_t *req) {
         return ESP_OK;
     }
 
-    wifi_ap_record_t ap_records[ap_count];
+    // **⚠ Reservar memoria dinámicamente para evitar stack overflow ⚠**
+    wifi_ap_record_t *ap_records = (wifi_ap_record_t *)malloc(ap_count * sizeof(wifi_ap_record_t));
+    if (!ap_records) {
+        ESP_LOGE("WIFI_SCAN", "Error: No se pudo asignar memoria para los registros de redes.");
+        httpd_resp_send_500(req); // Responder con error 500
+        return ESP_FAIL;
+    }
+
     ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&ap_count, ap_records));
 
     char json_response[1024] = "[";
@@ -884,6 +891,9 @@ esp_err_t scan_handler(httpd_req_t *req) {
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, json_response, strlen(json_response));
+
+    // Liberar memoria despues de usarla|
+    free(ap_records); 
 
     return ESP_OK;
 }
