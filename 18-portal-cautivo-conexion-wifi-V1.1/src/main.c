@@ -833,6 +833,72 @@ void url_decode(char *src, char *dest, size_t dest_size) {
     *d = '\0'; // Termina la cadena con el caracter nulo
 }
 
+esp_err_t script_handler(httpd_req_t *req) {
+    FILE *file = fopen("/spiffs/script.js", "r");
+
+    if (!file) {
+        ESP_LOGE(TAG, "No se pudo abrir el archivo script.js");
+        httpd_resp_send_404(req);
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/javascript");
+
+    char buffer[1024];
+    size_t read_bytes;
+
+    while ((read_bytes = fread(buffer, 1, sizeof(buffer), file)) > 0) {
+        httpd_resp_send_chunk(req, buffer, read_bytes);
+    }
+
+    httpd_resp_send_chunk(req, NULL, 0);
+    fclose(file);
+    return ESP_OK;
+}
+
+esp_err_t scan_handler(httpd_req_t *req) {
+
+    ESP_LOGI("WIFI_SCAN", "Ejecutando escaneo de redes...");
+
+    wifi_scan_config_t scan_config = {
+        .ssid = NULL,
+        .bssid = NULL,
+        .channel = 0,
+        .show_hidden = true
+    };
+
+    ESP_LOGI("WIFI_SCAN", "Iniciando escaneo de redes...");
+    ESP_ERROR_CHECK(esp_wifi_scan_start(&scan_config, true)); // Realizar escaneo sincrónico
+
+    uint16_t ap_count = 0;
+    esp_wifi_scan_get_ap_num(&ap_count);
+    ESP_LOGI("WIFI_SCAN", "Número de redes encontradas: %d", ap_count);
+
+    if (ap_count == 0) {
+        ESP_LOGW("WIFI_SCAN", "No se encontraron redes Wi-Fi.");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "[]", strlen("[]")); // Enviar lista vacía al cliente
+        return ESP_OK;
+    }
+
+    wifi_ap_record_t ap_records[ap_count];
+    ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&ap_count, ap_records));
+
+    char json_response[1024] = "[";
+    for (int i = 0; i < ap_count; i++) {
+        ESP_LOGI("WIFI_SCAN", "SSID detectado: %s", ap_records[i].ssid);
+        char ssid_entry[128];
+        snprintf(ssid_entry, sizeof(ssid_entry), "\"%s\"%s", ap_records[i].ssid, (i < ap_count - 1) ? "," : "");
+        strcat(json_response, ssid_entry);
+    }
+    strcat(json_response, "]");
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json_response, strlen(json_response));
+
+    return ESP_OK;
+}
+
 
 /**
  * @brief Este es un manejador HTTP que procesa una solicitud enviada desde un formulario
@@ -1039,6 +1105,24 @@ void start_http_server(void) {
             .user_ctx = NULL
         };
         httpd_register_uri_handler(server, &redirect);
+
+        httpd_uri_t script = {
+            .uri = "/script.js",
+            .method = HTTP_GET,
+            .handler = script_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(server, &script);
+
+        httpd_uri_t scan = {
+            .uri = "/scan",
+            .method = HTTP_GET,
+            .handler = scan_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(server, &scan);
+
+
     } else {
         /**
          * en caso de que el servidor no se haya iniciado se imprime el
@@ -1078,6 +1162,7 @@ void wifi_init_softap(void) {
 
     // Se crea la interfaz AP
     esp_netif_create_default_wifi_ap();
+    esp_netif_create_default_wifi_sta();
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
 
@@ -1123,7 +1208,7 @@ void wifi_init_softap(void) {
     }
 
     // Se establece el modo AP
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
 
     // Se establece la configuracion del wifi si el dispositivo esta en modo AP
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
@@ -1131,11 +1216,18 @@ void wifi_init_softap(void) {
     // Se inicia el Wi-Fi
     ESP_ERROR_CHECK(esp_wifi_start());
 
+    // Deshabilitar el ahorro de energía para un escaneo más preciso
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+
+    wifi_mode_t current_mode;
+    esp_wifi_get_mode(&current_mode);
+    ESP_LOGI(TAG, "Modo Wi-Fi actual: %d", current_mode);
+
     // Se enciende el LED RGB en color Cyan indicando que el ESP32 está en modo AP
     set_led_color(COLOR_CYAN);
 
     // Se imprime el SSID y la contraseña de la red en el monitor serial.
-    ESP_LOGI(TAG, "Modo AP iniciado con SSID: %s, Contraseña: %s", AP_SSID, AP_PASSWORD);
+    ESP_LOGI(TAG, "Modo AP+STA iniciado con SSID: %s, Contraseña: %s", AP_SSID, AP_PASSWORD);
 }
 
 /**
