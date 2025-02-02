@@ -5,7 +5,7 @@
 #include "esp_adc/adc_oneshot.h"
 #include "esp_log.h"
 
-#define TAG "ADC_ONESHOT_EXAMPLE"
+#define TAG "ADC"
 
 #define SAMPLE_PERIOD_MS 100
 
@@ -50,7 +50,7 @@ de atenuacion
     +----------+-------------+-----------------+
 
 */
-#define ADC_ATTENUATION ADC_ATTEN_DB_12
+#define ADC_ATTENUATION ADC_ATTEN_DB_6
 #define ADC_BITWIDTH ADC_BITWIDTH_12
 
 static TimerHandle_t xTimerADC=NULL;
