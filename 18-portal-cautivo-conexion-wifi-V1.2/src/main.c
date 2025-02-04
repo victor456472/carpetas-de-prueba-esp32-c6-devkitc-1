@@ -54,6 +54,8 @@ static TimerHandle_t xTimerADC = NULL;
 //handler del ADC
 static adc_oneshot_unit_handle_t adc_handle = NULL;
 
+bool wifi_connected = false; // Estado de conexión
+
 esp_err_t set_timer_adc(void);
 esp_err_t start_timer_adc(void);
 esp_err_t stop_timer_adc(void);
@@ -574,6 +576,8 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
          */
         ESP_LOGW(TAG, "Conexión fallida, intentando reconectar...");
 
+        wifi_connected = false;
+
         /**
          * Se llama nuevamente a esp_wifi_connect() para reintentar la conexión.
          */
@@ -622,84 +626,58 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
          * Se establece el led RGB de color verde para indicar que la conexion fue exitosa
          */
         set_led_color(COLOR_LIGHT_GREEN);
+        wifi_connected = true;
         //se habilita el ahorro de bateria
         ESP_LOGI(TAG, "Habilitando ahorro de energía Wi-Fi...");
         ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MIN_MODEM));
         //enciende la lectura del ADC
-        ESP_ERROR_CHECK(start_timer_adc());
+        //ESP_ERROR_CHECK(start_timer_adc());
     }
 }
 
-/**
- * @brief La función wifi_init_sta configura el ESP32 para operar en modo estación y conectarse
- * a una red Wi-Fi específica utilizando un SSID y una contraseña proporcionados como 
- * parámetros. Además gestiona la reconexión automatica y actualiza el estado del LED RGB
- * para reflejar el progreso o errores en el proceso de conexión.
- * 
- * @param[in] ssid el nombre de la red Wi-Fi a la que se conectará el ESP32
- * @param[in] password la contraseña de la red WiFi
- */
-void wifi_init_sta(const char *ssid, const char *password) {
-    /**
-     * Se imprime el LOG "Inicializando Wi-Fi en modo STA..." a traves del monitor serie.
-     */
-    ESP_LOGI(TAG, "Inicializando Wi-Fi en modo STA...");
+// **Nuevo manejador HTTP para consultar el estado de conexión**
+esp_err_t status_handler(httpd_req_t *req) {
+    const char *response = wifi_connected ? "CONNECTED" : "CONNECTING";
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_send(req, response, strlen(response));
+    return ESP_OK;
+}
 
-    /**
-     * Se declara la variable que almacenará el modo actual del Wi-Fi (AP o STA).
-     */
-    wifi_mode_t current_mode;
-    /**
-     * Con la funcion esp_wifi_get_mode() se obtiene el modo actual del Wi-Fi. esta funcion
-     * tiene como parametro la direccion de la memoria donde se almacenará el estado del Wi-Fi.current_mode
-     * Si la operación tiene exito devuelve ESP_OK.
-     * 
-     * Luego se evalua si el Wi-Fi esta en un modo distinto al de estación. En tal caso se detiene
-     * la tarea de ejecucion del Wi-Fi para poder iniciar correctamente el modo estación.
-     */
-    if (esp_wifi_get_mode(&current_mode) == ESP_OK && current_mode != WIFI_MODE_STA) {
-        ESP_ERROR_CHECK(esp_wifi_stop());
-    }
+void wifi_set_STA(void){
+    ESP_LOGI(TAG, "Configurando Wi-Fi en modo STA...");
 
-
-    /**
-     * Se declara un puntero estatico a la interfaz de red Wi-Fi en modo STA. es necesario
-     * colocarla como static para que la interfaz solo se cree una vez durante la vida del
-     * programa, de lo contrario esta interfaz se asignaria en NULL todas las veces que fuese
-     * invocada y esto puede causar problemas para conectarse
-     */
     static esp_netif_t *sta_netif = NULL;
-
-    /**
-     * Si la interfaz de red no existe, esta se inicializa mediante la función 
-     * esp_netif_creat_default_wifi_sta()
-     */
     if (!sta_netif) {
         sta_netif = esp_netif_create_default_wifi_sta();
-        if (!sta_netif) {
-            /**
-             * En caso de no haberse inicializado la interfaz de red se imprime "error al 
-             * crear la interfaz STA" y se termina la función con return.
-             */
-            ESP_LOGE(TAG, "Error al crear la interfaz STA");
-            return;
-        }
     }
 
-    /**
-     * Se declara la estructura wifi_init_config_t con valores predeterminados.
-     */
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    /**
-     * La función esp_wifi_init() inicializa el controlador Wi-Fi con la configuración
-     * especificada.
-     */
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
 
-    /**
-     * Se declara la estructura que almacena la configuración de Wi-Fi inicializandola 
-     * con campos vacios.
-     */
+    wifi_mode_t mode;
+    esp_wifi_get_mode(&mode);
+    if (mode == WIFI_MODE_NULL) {
+        ESP_LOGW(TAG, "Wi-Fi no iniciado. Estableciendo modo STA y arrancando...");
+        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+        ESP_ERROR_CHECK(esp_wifi_start());
+    } else {
+        ESP_LOGI(TAG, "Wi-Fi ya está en funcionamiento.");
+        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    }
+    
+    ESP_LOGI(TAG, "Modo STA activado, listo para conectarse.");
+}
+
+esp_err_t wifi_connect_STA(const char *ssid, const char *password) {
+    ESP_LOGI(TAG, "Conectando a la red Wi-Fi: %s...", ssid);
+
+    wifi_mode_t mode;
+
+    esp_wifi_get_mode(&mode);
+    if (mode != WIFI_MODE_STA && mode != WIFI_MODE_APSTA) {
+        ESP_LOGE(TAG, "Error: Wi-Fi no está en modo STA o AP+STA. No se puede conectar.");
+        return ESP_FAIL;
+    }
+    
     wifi_config_t wifi_config = {
         .sta = {
             .ssid = "",
@@ -707,57 +685,28 @@ void wifi_init_sta(const char *ssid, const char *password) {
         },
     };
 
-    /**
-     * Se asigna los valores del ssid y password mediante la funcion strncpy. esta
-     * tiene 3 parametros:
-     * 
-     * 1. Puntero al destino donde se copiara la cadena de caracteres
-     * 2. cadena de caracteres que se va a copiar
-     * 3. numero maximo de caracteres a copiar. para el caso de ssid es 32 caracteres
-     * mientras que para el caso de password es 64 caracteres.
-     */
     strncpy((char *)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid));
     strncpy((char *)wifi_config.sta.password, password, sizeof(wifi_config.sta.password));
 
-    // Se establece el Wi-Fi en modo estación
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    // Se aplica la configuración del SSID y la contraseña al controlador Wi-Fi
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    // Se inicia el modulo Wi-Fi en modo STA
-    ESP_ERROR_CHECK(esp_wifi_start());
-
-
-    // Se imprime en el LOG el ssid al que se intentará conectar el ESP32
-    ESP_LOGI(TAG, "Conectándose a SSID: %s", ssid);
-
-    /**
-     * Se inicia el proceso de conexion al punto de acceso Wi-Fi especificado.
-     * en caso que el proceso sea exitoso la función esp_wifi_connect() devuelve
-     * ESP_OK.  
-     */ 
+    ESP_LOGI(TAG, "Esperando conexión...");
     set_led_color(COLOR_YELLOW);
-    esp_err_t ret = esp_wifi_connect();
- 
-    /**
-     * Se evalua el estado de la conexión
-     */
-    if (ret != ESP_OK) {
+    ESP_ERROR_CHECK(esp_wifi_connect());
 
-        /**
-         * en caso de no haber sido exitosa la conexión, se establece el led indicador
-         * en color ROJO (COLOR_RED) y se imprime el error en el monitor serial.
-         */
+    // **Esperar hasta 10 intentos (~10 segundos)**
+    int intentos = 0;
+    while (!wifi_connected && intentos < 10) {
+        vTaskDelay(pdMS_TO_TICKS(1000));  // Esperar 1 segundo
+        intentos++;
+    }
 
-        set_led_color(COLOR_RED);
-        ESP_LOGE(TAG, "Error al intentar conectarse: %s", esp_err_to_name(ret));
+    if (wifi_connected) {
+        ESP_LOGI(TAG, "Conexión exitosa a: %s", ssid);
+        return ESP_OK;
     } else {
-
-        /**
-         * en caso que la conexión sea exitosa se establece el led indicador en color
-         * verde y se imprime en monitor serial "conectado a la red" 
-         */
-        
-        ESP_LOGI(TAG, "Conectado a la red");
+        set_led_color(COLOR_RED);
+        ESP_LOGW(TAG, "No se pudo conectar a: %s", ssid);
+        return ESP_FAIL;
     }
 }
 
@@ -992,15 +941,26 @@ esp_err_t submit_handler(httpd_req_t *req) {
             ESP_LOGI(TAG, "SSID Decodificado: %s", ssid);
             ESP_LOGI(TAG, "PASSWORD Decodificado: %s", password);
 
-            // Guardar credenciales en NVS
-            save_wifi_config_to_nvs(WIFI_MODE_STA, ssid, password);
+            // **Enviar respuesta indicando que se intentará conectar**
+            httpd_resp_set_type(req, "text/plain");
+            httpd_resp_send(req, "Intentando conectar a la red Wi-Fi...", strlen("Intentando conectar a la red Wi-Fi..."));
 
-            // Cambiar a modo STA
-            ESP_LOGI(TAG, "Modo AP detenido. Cambiando a modo STA...");
-            wifi_init_sta(ssid, password);
+            // **Ahora iniciamos la conexión después de enviar la respuesta**
+            vTaskDelay(pdMS_TO_TICKS(1000));  // Pequeña espera para evitar interferencias
 
-            // Se envia el mensaje "conectandose a la red especificada" al cliente.
-            httpd_resp_sendstr(req, "Conectándose a la red especificada...");
+            if (wifi_connect_STA(ssid, password) == ESP_OK) {
+                ESP_LOGI(TAG, "Conexión establecida correctamente.");
+                httpd_resp_set_type(req, "text/plain");
+                httpd_resp_send(req, "dispositivo conectado correctamente", strlen("dispositivo conectado correctamente"));
+                wifi_set_STA();
+                save_wifi_config_to_nvs(WIFI_MODE_STA, ssid, password);
+            } else {
+                ESP_LOGE(TAG, "Error al conectar a la red.");
+                httpd_resp_set_type(req, "text/plain");
+                httpd_resp_send(req, "error conectando el dispositivo", strlen("error conectando el dispositivo"));
+            }
+
+            return ESP_OK;
         } else {
             httpd_resp_sendstr(req, "Error al procesar los datos del formulario.");
         }
@@ -1055,7 +1015,6 @@ esp_err_t not_found_handler(httpd_req_t *req) {
     httpd_resp_send(req, NULL, 0);
     return ESP_OK;
 }
-
 // Iniciar servidor HTTP
 /**
  * @brief Iniciar servidor HTTP
@@ -1151,6 +1110,14 @@ void start_http_server(void) {
         };
         httpd_register_uri_handler(server, &scan);
 
+        httpd_uri_t status = {
+            .uri = "/status",
+            .method = HTTP_GET,
+            .handler = status_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(server, &status);
+
 
     } else {
         /**
@@ -1161,7 +1128,72 @@ void start_http_server(void) {
     }
 }
 
-// Inicializar Wi-Fi en modo AP
+void wifi_AP_run(void){
+    wifi_config_t wifi_config = {
+        .ap = {
+            .ssid = AP_SSID,
+            .password = AP_PASSWORD,
+            .ssid_len = strlen(AP_SSID),
+            .channel = 1,
+            .max_connection = MAX_STA_CONN,
+            .authmode = WIFI_AUTH_WPA_WPA2_PSK,
+        },
+    };
+
+    if (strlen(AP_PASSWORD) == 0) {
+        wifi_config.ap.authmode = WIFI_AUTH_OPEN;
+    }
+
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
+
+    ESP_LOGI(TAG, "interfaz de configuración activa con SSID: %s", AP_SSID);
+    // Se enciende el LED RGB en color Cyan indicando que el ESP32 está en modo AP
+    set_led_color(COLOR_CYAN);
+}
+
+void wifi_set_AP(void) {
+    ESP_LOGI(TAG, "Iniciando Wi-Fi en modo AP...");
+
+    static esp_netif_t *ap_netif = NULL;
+    if (!ap_netif) {
+        ap_netif = esp_netif_create_default_wifi_ap();
+    }
+
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+}
+
+void wifi_set_AP_STA(void) {
+    ESP_LOGI(TAG, "Iniciando Wi-Fi en modo AP+STA...");
+
+    static esp_netif_t *ap_netif = NULL;
+    static esp_netif_t *sta_netif = NULL;
+    if (!ap_netif) {
+        ap_netif = esp_netif_create_default_wifi_ap();
+    }
+    if (!sta_netif) {
+        sta_netif = esp_netif_create_default_wifi_sta();
+    }
+
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+}
+
+void wifi_system_init(void){
+    esp_err_t ret = nvs_flash_init();
+
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ESP_ERROR_CHECK(nvs_flash_init());
+    }
+
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+}
+
+// Inicializar Portal cautivo
 /**
  * @brief Inicializa el Wi-Fi en modo Access Point (AP).
  *
@@ -1175,87 +1207,14 @@ void start_http_server(void) {
  *
  * @return Nada.
  */
-void wifi_init_softap(void) {
-    ESP_LOGI(TAG, "Inicializando Wi-Fi en modo AP...");
-    /**
-     * Se activa el indicador "conectando", esto permite que el LED RGB indique
-     * cuando el ESP32 esta cambiando de modo AP a modo STA
-     */
+void start_captive_portal(void) {
 
-    //Se inicializa el TCPIP stack
-    ESP_ERROR_CHECK(esp_netif_init());
-    
-    // Se crea el bucle de eventos por defecto
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-
-    // Se crea la interfaz AP
-    esp_netif_create_default_wifi_ap();
-    esp_netif_create_default_wifi_sta();
-
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-
-    /*
-     * Se inicializa el wifi con la estructura por defecto. hay que tener
-     * en cuenta que la funcion esp_wifi_init() espera un puntero por lo
-     * cual hay que agregar & a la estructura cfg de la configuracion.
-     * 
-     * la inicializacion activa los recursos del driver del wifi como la
-     * estructura de control de wifi, el buffer de transmision y recepcion,
-     * la estructura NVS del wifi, etc... esto tambien inicializa la tarea
-     * de Wi-Fi.
-     * 
-     * es importante destacar dos cosas:
-     * 
-     * 1. Esta API debe ser llamada antes de que otras API Wi-Fi sean llamadas
-     * 
-     * 2. Es bueno usar WIFI_INIT_CONFIG_DEFAULT para inicializar la configuracion
-     *    de valores por defecto. esto garantiza que todos los campos tengan un
-     *    valor correcto antes de que mas campos sean añadidos al wifi_init_config_t
-     *    en futuras sentencias.
-     */
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-
-    //configuración de AP
-    wifi_config_t wifi_config = {
-        .ap = {
-            .ssid = AP_SSID,
-            .password = AP_PASSWORD,
-            .ssid_len = strlen(AP_SSID),
-            .channel = 1,
-            .max_connection = MAX_STA_CONN,
-            .authmode = WIFI_AUTH_WPA_WPA2_PSK,
-        },
-    };
-
-    /**
-     * Si la contraeña del wifi tiene un tamaño de 0 se establece como una
-     * red abierta.
-     */
-    if (strlen(AP_PASSWORD) == 0) {
-        wifi_config.ap.authmode = WIFI_AUTH_OPEN;
-    }
-
-    // Se establece el modo AP
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
-
-    // Se establece la configuracion del wifi si el dispositivo esta en modo AP
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
-
-    // Se inicia el Wi-Fi
-    ESP_ERROR_CHECK(esp_wifi_start());
-
-    // Deshabilitar el ahorro de energía para un escaneo más preciso
-    //ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+    wifi_set_AP_STA();
+    wifi_AP_run();
 
     wifi_mode_t current_mode;
     esp_wifi_get_mode(&current_mode);
     ESP_LOGI(TAG, "Modo Wi-Fi actual: %d", current_mode);
-
-    // Se enciende el LED RGB en color Cyan indicando que el ESP32 está en modo AP
-    set_led_color(COLOR_CYAN);
-
-    // Se imprime el SSID y la contraseña de la red en el monitor serial.
-    ESP_LOGI(TAG, "Modo AP+STA iniciado con SSID: %s, Contraseña: %s", AP_SSID, AP_PASSWORD);
 }
 
 /**
@@ -1333,9 +1292,9 @@ void clean_wifi_sta_connect_credentials(void *param) {
                     // serie.
                     ESP_LOGI(TAG, "Memoria NVS borrada y reinicializada.");
                     // Se detiene la lectura del ADC
-                    ESP_ERROR_CHECK(stop_timer_adc());
+                    //ESP_ERROR_CHECK(stop_timer_adc());
                     // Se coloca la ESP32 en modo AP
-                    wifi_init_softap();
+                    start_captive_portal();
                     // deshabilitar ahorro de batería
                     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
                     // Se conecta el servidor http
@@ -1355,6 +1314,8 @@ void clean_wifi_sta_connect_credentials(void *param) {
     }
 }
 
+
+
 void vTimerCallback(TimerHandle_t pxTimer)
 {
     adc_val = 0;
@@ -1370,11 +1331,7 @@ void vTimerCallback(TimerHandle_t pxTimer)
 }
 void app_main(void) {
 
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ESP_ERROR_CHECK(nvs_flash_init());
-    }
+    wifi_system_init();
 
     //inicializar gpios
     init_gpio();
@@ -1398,14 +1355,13 @@ void app_main(void) {
     wifi_mode_t mode = read_wifi_config_from_nvs(ssid, sizeof(ssid), password, sizeof(password));
 
     if (mode == WIFI_MODE_STA && strlen(ssid) > 0 && strlen(password) > 0) {
-        ESP_ERROR_CHECK(esp_netif_init());
-        ESP_ERROR_CHECK(esp_event_loop_create_default());
         // Si hay credenciales, iniciar en modo STA
-        wifi_init_sta(ssid, password);
+        wifi_set_STA();
+        wifi_connect_STA(ssid, password);
     } else {
         // Si no hay credenciales, iniciar en modo AP
         init_spiffs();
-        wifi_init_softap();
+        start_captive_portal();
         // Deshabilitar el ahorro de energía para un escaneo más preciso
         ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
         start_http_server();
