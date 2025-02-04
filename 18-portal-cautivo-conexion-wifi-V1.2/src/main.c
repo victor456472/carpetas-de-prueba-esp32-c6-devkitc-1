@@ -54,7 +54,12 @@ static TimerHandle_t xTimerADC = NULL;
 //handler del ADC
 static adc_oneshot_unit_handle_t adc_handle = NULL;
 
-bool wifi_connected = false; // Estado de conexión
+//estado de conexion a red de internet
+bool wifi_connected = false; 
+
+//estado de creación de interfaces STA y AP
+static esp_netif_t *sta_netif = NULL;
+static esp_netif_t *ap_netif = NULL;
 
 esp_err_t set_timer_adc(void);
 esp_err_t start_timer_adc(void);
@@ -553,23 +558,24 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
      * El siguiente evento ocurre cuando el Wi-Fi en modo STA ha iniciado y esta listo
      * para conectarse a una red
      */
-    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        /**
-         * Muestra un mensaje en el log: "Wi-Fi STA iniciado, conectando ..."
-         */
-        ESP_LOGI(TAG, "Wi-Fi STA iniciado, conectando...");
-
-        set_led_color(COLOR_YELLOW);
-        /**
-         * La función esp_wifi_connect() inicia el proceso de conexion Wi-Fi.
-         */
-        esp_wifi_connect(); // Iniciar la conexión
-    }
+    
+    //if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+    //    /**
+    //     * Muestra un mensaje en el log: "Wi-Fi STA iniciado, conectando ..."
+    //     */
+    //    ESP_LOGI(TAG, "Wi-Fi STA iniciado, conectando...");
+//
+    //    set_led_color(COLOR_YELLOW);
+    //    /**
+    //     * La función esp_wifi_connect() inicia el proceso de conexion Wi-Fi.
+    //     */
+    //    esp_wifi_connect(); // Iniciar la conexión
+    //}
     /**
      * Este evento ocurre cuando el dispositivo pierde la conexión Wi-Fi o no puede
      * conectarse a la red especificada.
      */ 
-    else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         /**
          * Registra una advertencia en el LOG con un mensaje que indica "Conexión 
          * conexion fallida, intentando reconectar..."
@@ -636,34 +642,49 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
 }
 
 // **Nuevo manejador HTTP para consultar el estado de conexión**
+
+/*
 esp_err_t status_handler(httpd_req_t *req) {
     const char *response = wifi_connected ? "CONNECTED" : "CONNECTING";
     httpd_resp_set_type(req, "text/plain");
     httpd_resp_send(req, response, strlen(response));
     return ESP_OK;
-}
+}*/
 
 void wifi_set_STA(void){
     ESP_LOGI(TAG, "Configurando Wi-Fi en modo STA...");
 
-    static esp_netif_t *sta_netif = NULL;
+    if (ap_netif) {
+        ESP_LOGI(TAG, "Eliminando interfaz AP antes de cambiar a STA...");
+        esp_netif_destroy(ap_netif);
+        ap_netif = NULL;
+    }
+
+    // **Verificar si la interfaz STA ya existe antes de crear una nueva**
     if (!sta_netif) {
+        ESP_LOGI(TAG, "Creando interfaz STA...");
         sta_netif = esp_netif_create_default_wifi_sta();
     }
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    // **Obtener el estado actual del Wi-Fi**
+    wifi_mode_t mode = WIFI_MODE_NULL; // Inicializar en un estado conocido
+    if (esp_wifi_get_mode(&mode) != ESP_OK) {
+        ESP_LOGW(TAG, "No se pudo obtener el modo Wi-Fi. Asegurar que Wi-Fi está iniciado.");
+    }
 
-    wifi_mode_t mode;
-    esp_wifi_get_mode(&mode);
+    // **Si Wi-Fi no está configurado en ningún modo, forzar modo STA**
     if (mode == WIFI_MODE_NULL) {
-        ESP_LOGW(TAG, "Wi-Fi no iniciado. Estableciendo modo STA y arrancando...");
+        ESP_LOGW(TAG, "Wi-Fi no tiene un modo configurado. Estableciendo modo STA...");
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
         ESP_ERROR_CHECK(esp_wifi_start());
-    } else {
-        ESP_LOGI(TAG, "Wi-Fi ya está en funcionamiento.");
+    } else if (mode != WIFI_MODE_STA) {
+        ESP_LOGW(TAG, "Cambiando Wi-Fi a modo STA...");
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    } else {
+        ESP_LOGI(TAG, "Wi-Fi ya está en modo STA. Iniciando Wi-Fi...");
+        ESP_ERROR_CHECK(esp_wifi_start());
     }
-    
+
     ESP_LOGI(TAG, "Modo STA activado, listo para conectarse.");
 }
 
@@ -693,7 +714,10 @@ esp_err_t wifi_connect_STA(const char *ssid, const char *password) {
     set_led_color(COLOR_YELLOW);
     ESP_ERROR_CHECK(esp_wifi_connect());
 
+    //vTaskDelay(pdMS_TO_TICKS(200));
+
     // **Esperar hasta 10 intentos (~10 segundos)**
+    
     int intentos = 0;
     while (!wifi_connected && intentos < 10) {
         vTaskDelay(pdMS_TO_TICKS(1000));  // Esperar 1 segundo
@@ -705,7 +729,7 @@ esp_err_t wifi_connect_STA(const char *ssid, const char *password) {
         return ESP_OK;
     } else {
         set_led_color(COLOR_RED);
-        ESP_LOGW(TAG, "No se pudo conectar a: %s", ssid);
+        ESP_LOGW(TAG, "No se pudo conectar a: %s, con la contraseña: %s", ssid, password);
         return ESP_FAIL;
     }
 }
@@ -950,14 +974,11 @@ esp_err_t submit_handler(httpd_req_t *req) {
 
             if (wifi_connect_STA(ssid, password) == ESP_OK) {
                 ESP_LOGI(TAG, "Conexión establecida correctamente.");
-                httpd_resp_set_type(req, "text/plain");
-                httpd_resp_send(req, "dispositivo conectado correctamente", strlen("dispositivo conectado correctamente"));
                 wifi_set_STA();
                 save_wifi_config_to_nvs(WIFI_MODE_STA, ssid, password);
             } else {
                 ESP_LOGE(TAG, "Error al conectar a la red.");
-                httpd_resp_set_type(req, "text/plain");
-                httpd_resp_send(req, "error conectando el dispositivo", strlen("error conectando el dispositivo"));
+
             }
 
             return ESP_OK;
@@ -1110,13 +1131,14 @@ void start_http_server(void) {
         };
         httpd_register_uri_handler(server, &scan);
 
+        /*
         httpd_uri_t status = {
             .uri = "/status",
             .method = HTTP_GET,
             .handler = status_handler,
             .user_ctx = NULL
         };
-        httpd_register_uri_handler(server, &status);
+        httpd_register_uri_handler(server, &status);*/
 
 
     } else {
@@ -1155,7 +1177,6 @@ void wifi_AP_run(void){
 void wifi_set_AP(void) {
     ESP_LOGI(TAG, "Iniciando Wi-Fi en modo AP...");
 
-    static esp_netif_t *ap_netif = NULL;
     if (!ap_netif) {
         ap_netif = esp_netif_create_default_wifi_ap();
     }
@@ -1166,8 +1187,6 @@ void wifi_set_AP(void) {
 void wifi_set_AP_STA(void) {
     ESP_LOGI(TAG, "Iniciando Wi-Fi en modo AP+STA...");
 
-    static esp_netif_t *ap_netif = NULL;
-    static esp_netif_t *sta_netif = NULL;
     if (!ap_netif) {
         ap_netif = esp_netif_create_default_wifi_ap();
     }
@@ -1190,6 +1209,23 @@ void wifi_system_init(void){
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+            // Manejar eventos de Wi-Fi
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(
+        WIFI_EVENT,
+        ESP_EVENT_ANY_ID,
+        &event_handler,
+        NULL,
+        NULL
+    ));
+    
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(
+        IP_EVENT,
+        IP_EVENT_STA_GOT_IP,
+        &event_handler,
+        NULL,
+        NULL
+    ));
 
 }
 
@@ -1331,6 +1367,20 @@ void vTimerCallback(TimerHandle_t pxTimer)
 }
 void app_main(void) {
 
+    /* 
+    //Se imprime el mensaje "borrando toda la memoria NVS" en el monitor serie
+    ESP_LOGI(TAG, "Borrando toda la memoria NVS...");
+
+    // se borra la memoria NVS
+    ESP_ERROR_CHECK(nvs_flash_erase());
+
+    // Se vuelve a inicializar la memoria NVS
+    ESP_ERROR_CHECK(nvs_flash_init());
+
+    // Se imprime el mensaje "memoria NVS borrada y reinicializada" en el monitor
+    // serie.
+    ESP_LOGI(TAG, "Memoria NVS borrada y reinicializada.");
+    */
     wifi_system_init();
 
     //inicializar gpios
@@ -1367,23 +1417,8 @@ void app_main(void) {
         start_http_server();
     }
 
-    // Manejar eventos de Wi-Fi
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(
-        WIFI_EVENT,
-        ESP_EVENT_ANY_ID,
-        &event_handler,
-        NULL,
-        NULL
-    ));
-    
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(
-        IP_EVENT,
-        IP_EVENT_STA_GOT_IP,
-        &event_handler,
-        NULL,
-        NULL
-    ));
 
+    
 }
 
 esp_err_t set_timer_adc(void)
