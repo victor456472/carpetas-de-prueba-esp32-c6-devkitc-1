@@ -1,5 +1,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/timers.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_netif.h"
@@ -11,6 +12,7 @@
 #include "nvs.h"
 #include "driver/gpio.h"
 #include "esp_timer.h"  // Librería para medir tiempo en microsegundos
+#include "esp_adc/adc_oneshot.h"
 
 #define AP_SSID "RED ESP32 VICTOR"
 #define AP_PASSWORD "12345678"
@@ -32,8 +34,33 @@
 #define BUTTON_GPIO 18       // Pin GPIO donde está conectado el botón
 #define HOLD_TIME_MS 10000   // Tiempo en milisegundos para considerar que el botón está presionado (10 segundos)
 
+//parametros del ADC
+#define SAMPLE_PERIOD_MS 100
+#define ADC_UNIT ADC_UNIT_1
+#define ADC_CHANNEL ADC_CHANNEL_5
+#define ADC_ATTENUATION ADC_ATTEN_DB_6
+#define ADC_BITWIDTH ADC_BITWIDTH_12
+
+//TAG del Wi-Fi
 static const char *TAG = "WIFI_AP";
+
+//TAG del ADC
+static const char *TAG_ADC = "ADC";
 static led_strip_t *led_strip=NULL;
+
+// handler del timer
+static TimerHandle_t xTimerADC = NULL;
+
+//handler del ADC
+static adc_oneshot_unit_handle_t adc_handle = NULL;
+
+esp_err_t set_timer_adc(void);
+esp_err_t start_timer_adc(void);
+esp_err_t stop_timer_adc(void);
+static void set_adc(void);
+
+//variable de lectura del sensor
+int adc_val = 0;
 
 /**
  * @brief Este es un metodo que permite inicializar los GPIOS del ESP32. hasta el
@@ -557,6 +584,8 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
          * ha fallado.
          */
         set_led_color(COLOR_RED);
+        //apaga la lectura del ADC
+        ESP_ERROR_CHECK(stop_timer_adc());
     } 
     /**
      * Este evento ocurre cuando el dispositivo ha obtenido una dirección IP valida del
@@ -593,8 +622,11 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
          * Se establece el led RGB de color verde para indicar que la conexion fue exitosa
          */
         set_led_color(COLOR_LIGHT_GREEN);
+        //se habilita el ahorro de bateria
         ESP_LOGI(TAG, "Habilitando ahorro de energía Wi-Fi...");
         ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MIN_MODEM));
+        //enciende la lectura del ADC
+        ESP_ERROR_CHECK(start_timer_adc());
     }
 }
 
@@ -844,8 +876,6 @@ esp_err_t script_handler(httpd_req_t *req) {
 }
 
 esp_err_t scan_handler(httpd_req_t *req) {
-
-
 
     ESP_LOGI("WIFI_SCAN", "Ejecutando escaneo de redes...");
 
@@ -1302,7 +1332,8 @@ void clean_wifi_sta_connect_credentials(void *param) {
                     // Se imprime el mensaje "memoria NVS borrada y reinicializada" en el monitor
                     // serie.
                     ESP_LOGI(TAG, "Memoria NVS borrada y reinicializada.");
-
+                    // Se detiene la lectura del ADC
+                    ESP_ERROR_CHECK(stop_timer_adc());
                     // Se coloca la ESP32 en modo AP
                     wifi_init_softap();
                     // deshabilitar ahorro de batería
@@ -1323,6 +1354,20 @@ void clean_wifi_sta_connect_credentials(void *param) {
         vTaskDelay(10 / portTICK_PERIOD_MS); 
     }
 }
+
+void vTimerCallback(TimerHandle_t pxTimer)
+{
+    adc_val = 0;
+    esp_err_t ret = adc_oneshot_read(adc_handle, ADC_CHANNEL, &adc_val);
+    if (ret == ESP_OK)
+    {
+        ESP_LOGI(TAG_ADC, "Lectura del sensor: %d", adc_val);
+    }
+    else
+    {
+        ESP_LOGE(TAG_ADC, "Error al leer el ADC: %s", esp_err_to_name(ret));
+    }
+}
 void app_main(void) {
 
     esp_err_t ret = nvs_flash_init();
@@ -1333,6 +1378,11 @@ void app_main(void) {
 
     //inicializar gpios
     init_gpio();
+
+    //inicializar controles del adc
+    set_adc();
+    set_timer_adc();
+    stop_timer_adc();
 
     // iniciar tarea para revisar boton de reset externo
     xTaskCreate(clean_wifi_sta_connect_credentials, "clean_wifi_sta_connect_credentials", 2048, NULL, 10, NULL);
@@ -1378,4 +1428,71 @@ void app_main(void) {
         NULL
     ));
 
+}
+
+esp_err_t set_timer_adc(void)
+{
+    xTimerADC = xTimerCreate(
+        "Timer",
+        (pdMS_TO_TICKS(SAMPLE_PERIOD_MS)),
+        pdTRUE,
+        (void *)0,
+        vTimerCallback);
+
+    if (xTimerADC == NULL)
+    {
+        ESP_LOGE(TAG_ADC, "Error creando el timer.");
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t start_timer_adc()
+{
+    if (xTimerADC == NULL)
+    {
+        ESP_LOGE(TAG_ADC, "El timer no ha sido inicializado.");
+        return ESP_FAIL;
+    }
+
+    if (xTimerStart(xTimerADC, 0) != pdPASS)
+    {
+        ESP_LOGE(TAG_ADC, "Error al iniciar el timer.");
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG_ADC, "Timer iniciado.");
+    return ESP_OK;
+}
+
+esp_err_t stop_timer_adc()
+{
+    if (xTimerADC == NULL)
+    {
+        ESP_LOGE(TAG_ADC, "El timer no ha sido inicializado.");
+        return ESP_FAIL;
+    }
+    if (xTimerStop(xTimerADC, 0) != pdPASS)
+    {
+        ESP_LOGE(TAG_ADC, "Error al detener el timer.");
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG_ADC, "Timer detenido.");
+    return ESP_OK;
+}
+
+static void set_adc(void)
+{
+    adc_oneshot_unit_init_cfg_t init_config = {
+        .unit_id = ADC_UNIT,
+        .ulp_mode = ADC_ULP_MODE_DISABLE,
+    };
+
+    ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_config, &adc_handle));
+
+    adc_oneshot_chan_cfg_t config = {
+        .bitwidth = ADC_BITWIDTH,
+        .atten = ADC_ATTENUATION};
+
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_handle, ADC_CHANNEL, &config));
 }
