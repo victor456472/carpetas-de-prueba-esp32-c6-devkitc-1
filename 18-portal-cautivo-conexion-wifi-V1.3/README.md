@@ -1,29 +1,29 @@
 <!--Usar el atajo Ctrl + Shift + P y escribir "Create Table of Contents" para crear tabla de contenido-->
-# Tabla de Contenido
-- [Tabla de Contenido](#tabla-de-contenido)
-- [Información general](#información-general)
-- [información tecnica](#información-tecnica)
-  - [ubicacion de archivos SPIFFS dentro del proyecto de platformIO](#ubicacion-de-archivos-spiffs-dentro-del-proyecto-de-platformio)
-  - [configuración de la memoria flash de la ESP32-C6-DevKitC-1](#configuración-de-la-memoria-flash-de-la-esp32-c6-devkitc-1)
-  - [tabla de particiones](#tabla-de-particiones)
-  - [Configuracion del archivo platformio.ini](#configuracion-del-archivo-platformioini)
-  - [Subir archivos a la memoria flash del ESP32](#subir-archivos-a-la-memoria-flash-del-esp32)
-  - [Acerca del programa cargado en la ESP32](#acerca-del-programa-cargado-en-la-esp32)
-    - [1. Capa principal](#1-capa-principal)
-    - [2. Capa 2](#2-capa-2)
-      - [**2.1. inicializar sistema wifi**](#21-inicializar-sistema-wifi)
+# **Tabla de Contenido**
+- [**Tabla de Contenido**](#tabla-de-contenido)
+- [**Información general**](#información-general)
+- [**Información tecnica**](#información-tecnica)
+  - [**Ubicacion de archivos SPIFFS dentro del proyecto de platformIO**](#ubicacion-de-archivos-spiffs-dentro-del-proyecto-de-platformio)
+  - [**Configuración de la memoria flash de la ESP32-C6-DevKitC-1**](#configuración-de-la-memoria-flash-de-la-esp32-c6-devkitc-1)
+  - [**Tabla de particiones**](#tabla-de-particiones)
+  - [**Configuracion del archivo platformio.ini**](#configuracion-del-archivo-platformioini)
+  - [**Subir archivos a la memoria flash del ESP32**](#subir-archivos-a-la-memoria-flash-del-esp32)
+  - [**Acerca del programa cargado en la ESP32**](#acerca-del-programa-cargado-en-la-esp32)
+    - [**1. Capa principal**](#1-capa-principal)
+    - [**2. Capa 2**](#2-capa-2)
+      - [**2.1. Inicializar sistema wifi**](#21-inicializar-sistema-wifi)
         - [**2.1.1 Estructura**:](#211-estructura)
         - [**2.1.2 Descripción**](#212-descripción)
-          - [**2.1.2.1 inicializar sistema de redes en la ESP32**](#2121-inicializar-sistema-de-redes-en-la-esp32)
-          - [**2.1.2.2 crear bucle de eventos de red principal de la ESP32**](#2122-crear-bucle-de-eventos-de-red-principal-de-la-esp32)
+          - [**2.1.2.1 Inicializar sistema de redes en la ESP32**](#2121-inicializar-sistema-de-redes-en-la-esp32)
+          - [**2.1.2.2 Crear bucle de eventos de red principal de la ESP32**](#2122-crear-bucle-de-eventos-de-red-principal-de-la-esp32)
           - [**2.1.2.3 Inicializar el controlador wifi con la configuración por defecto (ESP-IDF)**](#2123-inicializar-el-controlador-wifi-con-la-configuración-por-defecto-esp-idf)
-    - [3. Capa 3](#3-capa-3)
-    - [4. Capa 4](#4-capa-4)
-    - [1. inicializar SPIFFS](#1-inicializar-spiffs)
-    - [2. Inicializar servidor web (modificado)](#2-inicializar-servidor-web-modificado)
+    - [**3. Capa 3**](#3-capa-3)
+    - [**4. Capa 4**](#4-capa-4)
+    - [**1. Inicializar SPIFFS**](#1-inicializar-spiffs)
+    - [**2. Inicializar servidor web (modificado)**](#2-inicializar-servidor-web-modificado)
 
 
-# Información general
+# **Información general**
 
 El presente codigo muestra como se puede inicializar spiffs para cargar un archivo html a la memoria flash de la ESP32-C6-DevKit-C1. Esta accion tiene ciertas ventajas respecto a utilizar codigo html directamente en el codigo del programa:
 
@@ -47,13 +47,13 @@ a pesar de esto tambien tiene algunas desventajas asociadas:
 
 SPIFFS es mucho mas apropiado para proyectos medianos o grandes, los cuales deben manejar multiples recursos estaticos como HTML, CSS, JavaScript e imagenes. tambien es apropiado cuando se desea un diseño modular facil de modificar para mantenimiento.
 
-# información tecnica
+# **Información tecnica**
 
-## ubicacion de archivos SPIFFS dentro del proyecto de platformIO
+## **Ubicacion de archivos SPIFFS dentro del proyecto de platformIO**
 
 para ubicar archivos SPIFFS debe crear una carpeta llamada "data" en la raiz del proyecto. dentro de esta carpeta podra almacenar todos los archivos que se subirán a la memoria flash de la ESP32-C6-DevKitC-1.
 
-## configuración de la memoria flash de la ESP32-C6-DevKitC-1
+## **Configuración de la memoria flash de la ESP32-C6-DevKitC-1**
 
 por defecto, el IDE de platformIO reconoce que la ESP32-C6-DevKit-C1 tiene un total de 2MB de memoria flash. Sin embargo, esta tiene realmente un total de 8MB que deben ser indicados a la plataforma antes de configurar el archivo **platformio.ini**; subir los SPIFFS al ESP; y subir el programa. para ello dirijase a la consola de PlatforIO y escriba lo siguiente:
 
@@ -73,7 +73,7 @@ para salir del menú presione la tecla "esc" hasta que vuelva a aparecer la cons
 
 **Nota:** esta accion solo se realiza una sola vez y para este caso ya fue realizada por lo cual no es necesario que usted la repita si clonó este proyecto.
 
-## tabla de particiones
+## **Tabla de particiones**
 
 La tabla de particiones es un archivo de configuración que define cómo se organiza y divide la memoria flash del ESP32 en diferentes áreas, llamadas particiones. Cada partición tiene un propósito específico, como almacenar datos, el firmware de la aplicación, o sistemas de archivos como SPIFFS o FAT.
 
@@ -151,7 +151,7 @@ Finalmente, la partición **SPIFFS** se usa como sistema de archivos ligero para
 
     - Proporciona un nombre simbólico para la partición que puede usarse en el código para acceder a ella.
 
-## Configuracion del archivo platformio.ini
+## **Configuracion del archivo platformio.ini**
 
 es necesario hacer unas configuracuiones adicionales al archivo platformio.ini para que el IDE prepare el proyecto antes de usar SÏFFS.
 
@@ -173,7 +173,7 @@ board_build.partitions = partitions.csv
 board_build.fs_dir = data
 ```
 
-## Subir archivos a la memoria flash del ESP32
+## **Subir archivos a la memoria flash del ESP32**
 
 esta acción es necesaria antes de cargar el programa a la ESP32-C6-DevKitC-1, de lo contrario el servidor no encontrara el formulario http que debe retornarle al cliente. para ello asegurese de que en su proyecto se hayan realizado los pasos anteriores a esta sección (Si usted clonó este proyecto no tiene que preocuparse). Luego abra la terminal de comandos de platformIO y escriba lo siguiente:
 
@@ -196,19 +196,27 @@ pio run --target uploadfs
 ```
 Finalmente, podrá construir y subir el programa a la ESP32-C6-DevKitC-1
 
-## Acerca del programa cargado en la ESP32
+## **Acerca del programa cargado en la ESP32**
+
+[ir a tabla de Contenido](#tabla-de-contenido)
 
 En construccion ...
 
-### 1. Capa principal
+### **1. Capa principal**
+
+[ir a tabla de Contenido](#tabla-de-contenido)
 
 En construccion ...
 
-### 2. Capa 2
+### **2. Capa 2**
+
+[ir a tabla de Contenido](#tabla-de-contenido)
 
 En construccion ...
 
-#### **2.1. inicializar sistema wifi**
+#### **2.1. Inicializar sistema wifi**
+
+[ir a tabla de Contenido](#tabla-de-contenido)
 
 ##### **2.1.1 Estructura**:
 
@@ -218,7 +226,7 @@ En construccion ...
 
 la funcion [wifi_system_init()](./src/main.c) se encarga de asegurar que la memoria no volatil y los eventos del sistema estén correctamente configurados. es necesario llamarla al inicio de un programa que usa wifi.
 
-###### **2.1.2.1 inicializar sistema de redes en la ESP32**
+###### **2.1.2.1 Inicializar sistema de redes en la ESP32**
 
 El sistema de redes en la ESP32 es la parte del firmware que maneja la conectividad a redes Wi-Fi, Ethernet y otras interfaces de comunicación de datos. ESP-IDF (el framework de desarrollo de Espressif) proporciona una arquitectura de red modular para gestionar estas conexiones.
 
@@ -241,7 +249,7 @@ Si no se inicializa el sistema de redes, estas interfaces no pueden ser creadas.
 
 * [ESP-NETIF](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/network/esp_netif.html#initialization)
 
-###### **2.1.2.2 crear bucle de eventos de red principal de la ESP32**
+###### **2.1.2.2 Crear bucle de eventos de red principal de la ESP32**
 
 El bucle de eventos de red es un mecanismo en ESP-IDF que permite manejar eventos asincrónicos relacionados con Wi-Fi, Ethernet y TCP/IP en la ESP32. Su propósito es notificar al programa cuando ocurre un evento específico, como:
 
@@ -328,12 +336,15 @@ La estructura wifi_init_config_t define los parametros de configuración del Wi-
 | `.dump_hesigb_enable = WIFI_DUMP_HESIGB_ENABLED` | Habilita el volcado del campo **HE SIG-B**, usado en Wi-Fi 6. |
 | `.magic = WIFI_INIT_CONFIG_MAGIC` | Número mágico usado para verificar la correcta inicialización del Wi-Fi. |
 
+### **3. Capa 3**
 
-### 3. Capa 3
+[ir a tabla de Contenido](#tabla-de-contenido)
 
-### 4. Capa 4
+### **4. Capa 4**
 
-### 1. inicializar SPIFFS
+[ir a tabla de Contenido](#tabla-de-contenido)
+
+### **1. Inicializar SPIFFS**
 
 Estructura de la función:
 
@@ -369,7 +380,7 @@ al final, se intenta montar la partición SPIFFS:
 para mayor informacion puede revisar los comentarios en
 la funcion init_spiffs() del archivo src/main.c
 
-### 2. Inicializar servidor web (modificado)
+### **2. Inicializar servidor web (modificado)**
 
 Para entender la modificación realizada a este bloque del programa dirijase al diagrama que se encuentra en la documentación: [ejemplo15-inicializar-servidor-web](https://github.com/victor456472/carpetas-de-prueba-esp32-c6-devkitc-1/tree/master/15-modoAP-servidor-web#inicializar-servidor-web-estructura). Podrá observar que en el diagrama representativo de la función de inicializacion del servidor web hay un bloque de **registro de rutas**. cada ruta se registra a través de una estructura la cual requiere de una **funcion manejadora**.
 

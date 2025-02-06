@@ -81,6 +81,8 @@ int adc_val = 0;
  * momento solo se establece el GPIO 18 como entrada de pull down para poder conectar
  * un botón que pueda restablecer el modo AP de la ESP32 en caso de algun inconveniente
  * en el modo STA
+ * 
+ * @return nada
  */
 void init_gpio() {
     gpio_config_t io_conf = {
