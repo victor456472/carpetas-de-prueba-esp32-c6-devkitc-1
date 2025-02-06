@@ -17,6 +17,10 @@
           - [**2.1.2.1 Inicializar sistema de redes en la ESP32**](#2121-inicializar-sistema-de-redes-en-la-esp32)
           - [**2.1.2.2 Crear bucle de eventos de red principal de la ESP32**](#2122-crear-bucle-de-eventos-de-red-principal-de-la-esp32)
           - [**2.1.2.3 Inicializar el controlador wifi con la configuración por defecto (ESP-IDF)**](#2123-inicializar-el-controlador-wifi-con-la-configuración-por-defecto-esp-idf)
+      - [**2.2. Inicializar GPIOs**](#22-inicializar-gpios)
+        - [**2.2.1 Estructura**:](#221-estructura)
+        - [**2.2.2 Descripción**:](#222-descripción)
+        - [**2.2.3 hardware asociado**:](#223-hardware-asociado)
     - [**3. Capa 3**](#3-capa-3)
     - [**4. Capa 4**](#4-capa-4)
     - [**1. Inicializar SPIFFS**](#1-inicializar-spiffs)
@@ -200,19 +204,19 @@ Finalmente, podrá construir y subir el programa a la ESP32-C6-DevKitC-1
 
 [ir a tabla de Contenido](#tabla-de-contenido)
 
-En construccion ...
+Esta sección está en construcción ...
 
 ### **1. Capa principal**
 
 [ir a tabla de Contenido](#tabla-de-contenido)
 
-En construccion ...
+Esta sección está en construcción ...
 
 ### **2. Capa 2**
 
 [ir a tabla de Contenido](#tabla-de-contenido)
 
-En construccion ...
+Esta sección está en construcción ...
 
 #### **2.1. Inicializar sistema wifi**
 
@@ -335,6 +339,18 @@ La estructura wifi_init_config_t define los parametros de configuración del Wi-
 | `.tx_hetb_queue_num = WIFI_TX_HETB_QUEUE_NUM` | Número de colas **HE TB** para transmisión en **modo Wi-Fi 6 (HE TB PPDU)**. |
 | `.dump_hesigb_enable = WIFI_DUMP_HESIGB_ENABLED` | Habilita el volcado del campo **HE SIG-B**, usado en Wi-Fi 6. |
 | `.magic = WIFI_INIT_CONFIG_MAGIC` | Número mágico usado para verificar la correcta inicialización del Wi-Fi. |
+
+#### **2.2. Inicializar GPIOs**
+
+##### **2.2.1 Estructura**:
+<img src="assets\img\wifi_init_gpio_estructura.png" alt="wifi_init_gpio_estructura" width="600">
+
+##### **2.2.2 Descripción**:
+Este es un metodo que permite inicializar los GPIOS del ESP32. hasta el momento solo se establece el GPIO 18 como entrada de pull down para poder conectar un botón que pueda restablecer el modo AP de la ESP32 en caso de algun inconveniente en el modo STA
+
+##### **2.2.3 hardware asociado**:
+
+Esta sección está en construcción ...
 
 ### **3. Capa 3**
 
