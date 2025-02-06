@@ -712,10 +712,8 @@ void stop_connection_event_handler(void){
         WIFI_EVENT_STA_DISCONNECTED, 
         instance_any_id
     ));
-    
+
 }
-
-
 
 esp_err_t wifi_connect_STA(const char *ssid, const char *password) {
     ESP_LOGI(TAG, "Conectando a la red Wi-Fi: %s...", ssid);
@@ -1259,18 +1257,61 @@ void wifi_set_AP_STA(void) {
     set_led_color(COLOR_CYAN);
 }
 
-
+/**
+ * @brief Inicializacion del sistema wifi
+ * 
+ * esta funcion se encarga de asegurar que la memoria no volatil y los eventos
+ * del sistema estén correctamente configurados.
+ * 
+ * es necesario llamarla al inicio de un programa que usa wifi.
+ * 
+ * @return nada
+ */
 void wifi_system_init(void){
+    /**
+     * Inicializa la memoria no volatil donde se almacenan las configuraciones
+     * persistentes como las credenciales Wi-Fi
+     * 
+     * @return retorna un codigo de error que indica si la inicialización fue 
+     * exitosa o falló
+     */
     esp_err_t ret = nvs_flash_init();
-
+    /**
+     * Si la inicialización de NVS falla por uno de estos dos motivos:
+     * 
+     * - ESP_ERR_NVS_NO_FREE_PAGES: No hay más espacio en la memoria NVS.
+     * - ESP_ERR_NVS_NEW_VERSION_FOUND: Se detecta una versión diferente de NVS 
+     * (por ejemplo, tras una actualización del firmware).
+     * 
+     * Esto se soluciona borrando y reinicializando la memoria NVS
+     */
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        // Borra toda la memoria NVS
         ESP_ERROR_CHECK(nvs_flash_erase());
+        // vuelve a inicializar NVS desde cero
         ESP_ERROR_CHECK(nvs_flash_init());
     }
-
+    /**
+     * Inicializa el sistema de redes en la ESP32. Esto es necesario antes de
+     * configurar cualquier interfaz Wi-Fi o Ethernet
+     */
     ESP_ERROR_CHECK(esp_netif_init());
+    /**
+     * Crea el bucle de eventos principal de la ESP32, que se encargará de manejar
+     * eventos de Wi-Fi, red y otros perifericos
+     */
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+
+    /**
+     * - wifi_init_config_t es una estructura que contiene parámetros de 
+     *   configuración para Wi-Fi.
+     * 
+     * - WIFI_INIT_CONFIG_DEFAULT() es un macro que devuelve una configuración 
+     *   estándar recomendada por ESP-IDF.
+     */
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+
+    //inicializa el controlador Wi-Fi con la configuración establecida.
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
 }
