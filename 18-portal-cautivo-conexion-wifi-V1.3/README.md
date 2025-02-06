@@ -18,9 +18,15 @@
           - [**2.1.2.2 Crear bucle de eventos de red principal de la ESP32**](#2122-crear-bucle-de-eventos-de-red-principal-de-la-esp32)
           - [**2.1.2.3 Inicializar el controlador wifi con la configuración por defecto (ESP-IDF)**](#2123-inicializar-el-controlador-wifi-con-la-configuración-por-defecto-esp-idf)
       - [**2.2. Inicializar GPIOs**](#22-inicializar-gpios)
-        - [**2.2.1 Estructura**:](#221-estructura)
+        - [**2.2.1 Algoritmo del programa**:](#221-algoritmo-del-programa)
         - [**2.2.2 Descripción**:](#222-descripción)
         - [**2.2.3 hardware asociado**:](#223-hardware-asociado)
+      - [**2.3. Configurar el ADC**](#23-configurar-el-adc)
+        - [**2.3.1 Algoritmo del programa**](#231-algoritmo-del-programa)
+        - [**2.3.2 Descripción**](#232-descripción)
+          - [**2.3.1.1 Configurar e inicializar la unidad ADC**](#2311-configurar-e-inicializar-la-unidad-adc)
+          - [**2.3.1.2 Configurar e inicializar canal del ADC**](#2312-configurar-e-inicializar-canal-del-adc)
+        - [**2.3.3 hardware asociado**:](#233-hardware-asociado)
     - [**3. Capa 3**](#3-capa-3)
     - [**4. Capa 4**](#4-capa-4)
     - [**1. Inicializar SPIFFS**](#1-inicializar-spiffs)
@@ -341,14 +347,102 @@ La estructura wifi_init_config_t define los parametros de configuración del Wi-
 | `.magic = WIFI_INIT_CONFIG_MAGIC` | Número mágico usado para verificar la correcta inicialización del Wi-Fi. |
 
 #### **2.2. Inicializar GPIOs**
+[ir a tabla de Contenido](#tabla-de-contenido)
 
-##### **2.2.1 Estructura**:
-<img src="assets\img\wifi_init_gpio_estructura.png" alt="wifi_init_gpio_estructura" width="600">
+##### **2.2.1 Algoritmo del programa**:
+<img src="assets\img\wifi_init_gpio_estructura.png" alt="wifi_init_gpio_estructura" width="800">
 
 ##### **2.2.2 Descripción**:
 Este es un metodo que permite inicializar los GPIOS del ESP32. hasta el momento solo se establece el GPIO 18 como entrada de pull down para poder conectar un botón que pueda restablecer el modo AP de la ESP32 en caso de algun inconveniente en el modo STA
 
 ##### **2.2.3 hardware asociado**:
+
+Esta sección está en construcción ...
+
+#### **2.3. Configurar el ADC**
+[ir a tabla de Contenido](#tabla-de-contenido)
+##### **2.3.1 Algoritmo del programa**
+
+<img src="assets\img\configurar_adc.png" alt="configurar_adc" width="700">
+
+##### **2.3.2 Descripción**
+
+la función `set_adc()` configura y habilita un ADC (Conversor Analógico-Digital) en la ESP32 utilizando el modo de lectura "oneshot", que permite realizar mediciones de voltaje bajo demanda a través del GPIO 5.
+
+###### **2.3.1.1 Configurar e inicializar la unidad ADC**
+
+El proceso inicia con la configuracion de la unidad del ADC. para entender esto, es necesario saber que actualmente en la ESP32, el conversor Analógico-Digital (ADC) esta dividido en multiples unidades, cada una con sus propios canales. estas unidades permiten leer señales analogicas y convertirlas en valores digitales.
+
+En ESP_IDF una "Unidad ADC" (`ADC_UNIT_X`) se refiere a un bloque de hardware dentro del chip ESP32 que realiza la conversion de señales analogicas a digitales. En la ESP32-C6, solo existe una unidad ADC (`ADC_UNIT_1`) sin embargo en ESP clasicas existen hasta dos unidades. 
+
+Este listado muestra el numero de unidades que tienen diferentes modelos de ESP32:
+
+| **Modelo**   | **Unidades ADC**           | **Canales Disponibles** |
+|-------------|--------------------------|----------------------|
+| ESP32       | `ADC_UNIT_1`, `ADC_UNIT_2` | 18 canales          |
+| ESP32-S2    | `ADC_UNIT_1`               | 10 canales          |
+| ESP32-S3    | `ADC_UNIT_1`, `ADC_UNIT_2` | 20 canales          |
+| ESP32-C3    | `ADC_UNIT_1`               | 5 canales           |
+| ESP32-C6    | `ADC_UNIT_1`               | 6 canales           |
+
+*Nota: para mas detalles sobre unidades revisar [Resource Allocation](https://docs.espressif.com/projects/esp-idf/en/v5.4/esp32/api-reference/peripherals/adc_oneshot.html#resource-allocation)*
+
+Otro tema a tener en cuenta respecto a la configuracion de la unidad es el ULP que se refiere a un coprocesador de bajo consumo en algunas variantes del ESP32. Este permite realizar tareas de bajo consumo mientras la CPU principal está en modo de bajo consumo o suspensión.
+
+Es posible habilitar o deshabilitar el modo ULP en el ADC para que este funcione mientras la CPU principal está dormida de forma que la lectura se haga en modo de bajo consumo. si se desactiva el ADC solo funciona cuando la CPU principal está activa, sin embargo se contará con la ventaja de tener mayor precisión y estabilidad en las mediciones además de poder usar el ADC con llamadas normales (`adc_oneshot_read()`)
+
+El proceso de configuración de la unidad se realiza mediante la estructura `adc_oneshot_unit_init_cfg_t` y este debe ser inicializado mediante la función `adc_oneshot_new_unit`. para que la inicialización funcione es necesario ingresar la direccion de memoria del handler del ADC (`&adc_handle`) ya que el manejador del ADC se crea dinámicamente dentro de la función, y su direccion de memoria debe ser almacenada en `adc_handle`. Si no se pasa la direccion de memoria del handler, la función no podría modificar `adc_handle` y no se sabria donde está almacenado el ADC.
+
+El flujo de este programa se puede ver a continuación:
+
+<img src="assets\img\configurar_unidad_adc.png" alt="configurar_unidad_adc" width="1000">
+
+###### **2.3.1.2 Configurar e inicializar canal del ADC**
+
+para configurar el canal ADC se requiere de la estructura `adc_oneshot_chan_cfg_t` la cual permite especificar la resolución en bits del ADC así como la atenuación del voltaje de entrada.
+
+para entender esto es necesario aclarar algunos conceptos de electronica digital:
+
+cuando se dice que el ADC tiene una resolución de $n$ bits, quiere decir que, ante un determinado rango de voltaje de entrada, el ADC puede representar a su salida un valor numerico entre un limite inferior $out_{min}$ de 0 y un limite superior dado por la ecuación:
+
+ $out_{max}=(2^{n_{bits}})-1$
+
+ En este caso, fue configurada una resolución de 12 bits por lo cual puede representar un rango numerico entero entre 0 y 4095. sin embargo, tambien se pueden configurar las siguientes resoluciones:
+
+| **Resolución** | **Rango numérico** |
+|--------------|----------------|
+| 9 bits      | 0-511          |
+| 10 bits     | 0-1023         |
+| 11 bits     | 0-2047         |
+| 12 bits     | 0-4095         |
+| 13 bits     | 0-8191         |
+
+En lo que respecta al nivel de atenuación, el ADC de la ESP32-C6 funciona internamente con un voltaje de hasta 1.1 voltios, sin embargo este ADC tiene una resistencia interna que puede ser configurada para atenuar voltajes mas grandes que 1.1 voltios. 
+
+los niveles de atenuacion que maneja ESP-IDF son:
+
+* 2.5dB
+* 6dB
+* 12dB
+* 11dB <-- Obsoleto
+
+El objetivo principal es lograr que con el nivel de atenuacion escogido, se reduzca la amplitud pico de la señal de entrada a un nivel muy cercano a 1.1 voltios. para ello se sigue la relación:
+
+$v_{in}=1.1 \times 10^{\frac{dB}{20}} [V]$
+
+donde $v_{in}$ es el voltaje pico de la señal de entrada y $dB$ es el nivel de atenuación seleccionado.
+
+El fabricante recomienda que se tomen voltajes de entrada menores a 2.5 voltios para que la lectura del ADC sea lineal. teniendo esto en mente, se seleccionó un nivel de atenuación de 6dB de forma que el voltaje pico de la señal de entrada se limite a un máximo de 2.2 voltios. Sin embargo, el sensor que se está utilizando trabaja con una señal analogica de hasta 5 voltios por lo cual fue necesario diseñar un divisor de voltaje para alcanzar el rango de tensión apropiado. Este diseño se explica en el apartado del [hardware asociado](#233-hardware-asociado) a esta función.
+
+una vez establecida la estructura de configuración, se inicializa el canal del ADC mediante la función `adc_oneshot_config_channel` a la cual se le debe especificar handler del ADC, el canal ADC que se va a utilizar y la estructura de configuración del canal.
+
+es importante aclarar que para el caso del ESP32-C6 se dispone de los canales 0 al 6 ubicados en los GPIOS con la misma numeración.
+
+Con esto en mente, el algoritmo de configuracion e inicialización del ADC es el siguiente:
+
+<img src="assets\img\configurar_canal_adc.png" alt="configurar_canal_adc" width="1000">
+
+##### **2.3.3 hardware asociado**:
 
 Esta sección está en construcción ...
 

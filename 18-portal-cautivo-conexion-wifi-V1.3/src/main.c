@@ -1552,18 +1552,80 @@ esp_err_t stop_timer_adc()
     return ESP_OK;
 }
 
+/**
+ * @brief configurar ADC
+ * 
+ * la función set_adc() configura y habilita un ADC (Conversor Analógico-Digital) en la ESP32 
+ * utilizando el modo de lectura "oneshot", que permite realizar mediciones de voltaje bajo 
+ * demanda a traves del GPIO 5.
+ * 
+ * @return Nada
+ */
 static void set_adc(void)
 {
+    /**
+     * @brief configuracion de la unidad ADC
+     * 
+     * La estructura adc_oneshot_unit_init_cfg_t permite configurar el modulo
+     * ADC. los campos principales de esta estructura son:
+     * 
+     * @param[in] unit_id Selecciona que unidad de ADC se usará (El ESP32-C6 tiene
+     * ADC_UNIT:1 y ADC_UNIT_2). para este caso se selecciona la unidad 1
+     * 
+     * @param[in] ulp_mode Confirma si se desea activar o desactivar el modo ULP.
+     * En este caso se desactiva ya que se quieren mediciones normales.
+     */
     adc_oneshot_unit_init_cfg_t init_config = {
         .unit_id = ADC_UNIT,
         .ulp_mode = ADC_ULP_MODE_DISABLE,
     };
 
+    /**
+     * Se inicializa la unidad del ADC con la configuracion de init_config mediante 
+     * la función adc_oneshot_new_unit(). los parametros de esta funcion son:
+     * 
+     * @param[in] init_config driver de configuraciones. se requiere la direccion
+     * de memoria de la estructura adc_oneshot_unit_init_cfg_t
+     * 
+     * @param[out] ret_unit manejador de la unidad del ADC el cual se aloja en la
+     * dirección de memoria del handler del ADC. En este se guardaran las configuraciones 
+     * de la unidad del ADC y el estado del modo ULP.
+     */
     ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_config, &adc_handle));
 
+    /**
+     * @brief Configuración del canal ADC
+     * 
+     * la estructura adc_oneshot_chan_cfg_t permite configurar el canda del ADC
+     * sobre el cual se realizará la lectura. los parametros del canal son:
+     * 
+     * @param[in] bitwidth Configura la resolución en bits del ADC. en este caso
+     * se establece una resolución de 12 bits para una lectura de entre 0 y 4096
+     * @param[in] atten configura la atenuación del voltaje de entrada. esto es
+     * necesario ya que el ADC del ESP32-C6 funciona con un voltaje maximo de 1.1
+     * voltios y normalmente los DevKits manejan voltajes entre 3.3 y 5 voltios.
+     * en este caso se decidió usar una atenuación de 6dB para una entrada de
+     * voltaje de 2.2 voltios para asegurar todo el campo de medida del ADC.
+     */
     adc_oneshot_chan_cfg_t config = {
         .bitwidth = ADC_BITWIDTH,
         .atten = ADC_ATTENUATION};
 
+    /**
+     * Se aplica la configuracion al canal con los parametros declarados en la
+     * estructura config. la funcion adc_oneshot_config_channel tiene los siguientes
+     * parametros:
+     * 
+     * @param[in] handle handler del ADC
+     * @param[in] chan canal del adc. En este caso se usa el canal 5, el cual se 
+     * aloja en el GPIO 5
+     * @param[in] config estructura de configuración adc_oneshot_chan_cfg_t
+     * 
+     * @return 
+     *      - ESP_OK: Si la operación se realiza correctamente
+     *      - ESP_ERR_INVALID_ARG: Si se coloca algun argumento invalido
+     *      - ESP_ERR_TIMEOUT: Si el sistema demora mucho tiempo en configurar 
+     *        el canal por algun motivo.
+     */
     ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_handle, ADC_CHANNEL, &config));
 }
