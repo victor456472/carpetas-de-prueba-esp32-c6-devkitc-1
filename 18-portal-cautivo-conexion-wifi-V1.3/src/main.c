@@ -1265,6 +1265,10 @@ void wifi_set_AP_STA(void) {
  * 
  * es necesario llamarla al inicio de un programa que usa wifi.
  * 
+ * para mas detalles dirijase a:
+ * 
+ * https://github.com/victor456472/carpetas-de-prueba-esp32-c6-devkitc-1/tree/master/18-portal-cautivo-conexion-wifi-V1.3#21-inicializar-sistema-wifi
+ * 
  * @return nada
  */
 void wifi_system_init(void){
