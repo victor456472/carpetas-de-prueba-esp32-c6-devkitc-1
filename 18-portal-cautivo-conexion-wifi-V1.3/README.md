@@ -12,15 +12,15 @@
     - [**1. Capa principal**](#1-capa-principal)
     - [**2. Capa 2**](#2-capa-2)
       - [**2.1. Inicializar sistema wifi**](#21-inicializar-sistema-wifi)
-        - [**2.1.1 Estructura**:](#211-estructura)
+        - [**2.1.1 Algoritmo del programa**](#211-algoritmo-del-programa)
         - [**2.1.2 Descripción**](#212-descripción)
           - [**2.1.2.1 Inicializar sistema de redes en la ESP32**](#2121-inicializar-sistema-de-redes-en-la-esp32)
           - [**2.1.2.2 Crear bucle de eventos de red principal de la ESP32**](#2122-crear-bucle-de-eventos-de-red-principal-de-la-esp32)
           - [**2.1.2.3 Inicializar el controlador wifi con la configuración por defecto (ESP-IDF)**](#2123-inicializar-el-controlador-wifi-con-la-configuración-por-defecto-esp-idf)
       - [**2.2. Inicializar GPIOs**](#22-inicializar-gpios)
-        - [**2.2.1 Algoritmo del programa**:](#221-algoritmo-del-programa)
-        - [**2.2.2 Descripción**:](#222-descripción)
-        - [**2.2.3 hardware asociado**:](#223-hardware-asociado)
+        - [**2.2.1 Algoritmo del programa**](#221-algoritmo-del-programa)
+        - [**2.2.2 Descripción**](#222-descripción)
+        - [**2.2.3 hardware asociado**](#223-hardware-asociado)
       - [**2.3. Configurar el ADC**](#23-configurar-el-adc)
         - [**2.3.1 Algoritmo del programa**](#231-algoritmo-del-programa)
         - [**2.3.2 Descripción**](#232-descripción)
@@ -228,7 +228,7 @@ Esta sección está en construcción ...
 
 [ir a tabla de Contenido](#tabla-de-contenido)
 
-##### **2.1.1 Estructura**:
+##### **2.1.1 Algoritmo del programa**
 
 <img src="assets\img\wifi_system_init_estructura.png" alt="Diagrama_2_" width="600">
 
@@ -349,15 +349,17 @@ La estructura wifi_init_config_t define los parametros de configuración del Wi-
 #### **2.2. Inicializar GPIOs**
 [ir a tabla de Contenido](#tabla-de-contenido)
 
-##### **2.2.1 Algoritmo del programa**:
+##### **2.2.1 Algoritmo del programa**
 <img src="assets\img\wifi_init_gpio_estructura.png" alt="wifi_init_gpio_estructura" width="800">
 
-##### **2.2.2 Descripción**:
+##### **2.2.2 Descripción**
 Este es un metodo que permite inicializar los GPIOS del ESP32. hasta el momento solo se establece el GPIO 18 como entrada de pull down para poder conectar un botón que pueda restablecer el modo AP de la ESP32 en caso de algun inconveniente en el modo STA
 
-##### **2.2.3 hardware asociado**:
+##### **2.2.3 hardware asociado**
 
-Esta sección está en construcción ...
+El GPIO18 recibe una señal binaria de entrada enviada por un pulsador de pull down externo al ESP32 (Importante armar el circuito que se muestra a continuación).
+
+<img src="assets\img\circuito_pulsador_reset.png" alt="circuito_pulsador_reset" width="400">
 
 #### **2.3. Configurar el ADC**
 [ir a tabla de Contenido](#tabla-de-contenido)
@@ -367,7 +369,7 @@ Esta sección está en construcción ...
 
 ##### **2.3.2 Descripción**
 
-la función `set_adc()` configura y habilita un ADC (Conversor Analógico-Digital) en la ESP32 utilizando el modo de lectura "oneshot", que permite realizar mediciones de voltaje bajo demanda a través del GPIO 5.
+la función `set_adc()` configura y habilita un ADC (Conversor Analógico-Digital) en la ESP32 utilizando el modo de lectura "oneshot", que permite realizar mediciones de voltaje bajo demanda a través del GPIO 5. 
 
 ###### **2.3.1.1 Configurar e inicializar la unidad ADC**
 
@@ -444,7 +446,19 @@ Con esto en mente, el algoritmo de configuracion e inicialización del ADC es el
 
 ##### **2.3.3 hardware asociado**:
 
-Esta sección está en construcción ...
+Para que el ADC pueda capturar la señal analogica que emite el sensor es necesario realizar una operacion de escalamiento mediante un circuito reductor. En este caso la señal de entrada tiene una amplitud pico de 5 voltios y el ADC requiere un voltaje maximo de 2.2 voltios. Esto implica que la ganancia del circuito reductor debe ser:
+
+$$k=\frac{v_{out}}{v_{in}}=\frac{2.2[V]}{5[V]}=0.44$$
+
+La estrategia utilizada para lograr esta ganancia es utilizar un divisor de voltaje con las resistencias $R3$ y $R4$. Se empleó el voltaje $v_{R3}$ como salida del reductor y se definio su resistencia de forma arbitraria en $10k\Omega$. para saber el valor correcto de $R4$ se usa la formula de ganancia del divisor de voltaje:
+
+$$k=\frac{R3}{R3+R4}\rightarrow R4=R3\times \frac{(1-k)}{k}$$
+
+Reemplazando los valores de $R3$ y $k$ se encuentra que se requiere una resistencia de $(140/11)k\Omega$ lo cual es aproximadamente igual a $12.7k\Omega$. Para darle estabilidad a la señal se agrega en paralelo un capacitor de $100\mu F$ teniendo en cuenta que el sensor no tiene variaciones de señal de alta frecuencia. Finalmente se asegura el acople de impedancias colocando un amplificador operacional en modo de seguidor de voltaje. El circuito completo de acondicionamiento de señal se muestra a continuación:
+
+<img src="assets\img\Circuito_sensor_analogico.png" alt="Circuito_sensor_analogico" width="900">
+
+
 
 ### **3. Capa 3**
 
