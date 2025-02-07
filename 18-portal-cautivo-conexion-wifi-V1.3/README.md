@@ -27,7 +27,13 @@
           - [**2.3.1.1 Configurar e inicializar la unidad ADC**](#2311-configurar-e-inicializar-la-unidad-adc)
           - [**2.3.1.2 Configurar e inicializar canal del ADC**](#2312-configurar-e-inicializar-canal-del-adc)
         - [**2.3.3 hardware asociado**:](#233-hardware-asociado)
+      - [**2.3. Establecer timer del ADC**](#23-establecer-timer-del-adc)
+        - [**2.3.1 Algoritmo del programa**](#231-algoritmo-del-programa-1)
+        - [**2.3.2 Definición**](#232-definición)
     - [**3. Capa 3**](#3-capa-3)
+      - [**3.1. Lectura del sensor de CO2**](#31-lectura-del-sensor-de-co2)
+        - [**3.1.1 Algoritmo del programa**](#311-algoritmo-del-programa)
+        - [**3.1.2 Descripción**](#312-descripción)
     - [**4. Capa 4**](#4-capa-4)
     - [**1. Inicializar SPIFFS**](#1-inicializar-spiffs)
     - [**2. Inicializar servidor web (modificado)**](#2-inicializar-servidor-web-modificado)
@@ -458,11 +464,40 @@ Reemplazando los valores de $R3$ y $k$ se encuentra que se requiere una resisten
 
 <img src="assets\img\Circuito_sensor_analogico.png" alt="Circuito_sensor_analogico" width="900">
 
+#### **2.3. Establecer timer del ADC**
 
+[ir a tabla de Contenido](#tabla-de-contenido)
+
+##### **2.3.1 Algoritmo del programa**
+
+<img src="assets\img\Establecer_temporizador_ADC.png" alt="Establecer_temporizador_ADC" width="800">
+
+##### **2.3.2 Definición**
+
+Se utiliza un timer de freeRTOS para poder realizar la lectura del ADC de forma periodica y asincronica. el procedimiento para configurar el timer se basa en la creacion de un manejador a través de la función (`xTimerCreate`) la cual permite establecer parametros como el periodo, el reset del timer y la función que se ejecutará una vez expirado el tiempo.
+
+para este caso, el timer se establece con un periodo de 100ms con repetición. La función que se ejecuta con el timer se denomina `vTimerCallBack` y es la encargada de la [lectura del sensor de CO2](#31-lectura-del-sensor-de-co2)
 
 ### **3. Capa 3**
 
 [ir a tabla de Contenido](#tabla-de-contenido)
+
+#### **3.1. Lectura del sensor de CO2**
+
+[volver a seccion 2.3.2](#232-definición)
+
+##### **3.1.1 Algoritmo del programa**
+
+<img src="assets\img\lectura_sensor_CO2.png" alt="lectura_sensor_CO2" width="900">
+
+##### **3.1.2 Descripción**
+
+ este programa se ejecuta automáticamente cada vez que el temporizador expira, es decir, cada SAMPLE_PERIOD_MS=100 (milisegundos).
+ 
+ Su función principal es leer el valor del ADC y registrarlo en el monitor serie.
+
+ el parametro pxTimer es un manejador del temporizador freeRTOS. En esta ocasión no es usado pero podria servir para obtener información del temporizador si hubiera varios activos.
+
 
 ### **4. Capa 4**
 

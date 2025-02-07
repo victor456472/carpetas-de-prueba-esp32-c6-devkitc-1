@@ -1444,11 +1444,46 @@ void clean_wifi_sta_connect_credentials(void *param) {
 }
 
 
-
+/**
+ * @brief Lectura del sensor
+ * 
+ * vTimerCallback() se ejecuta automáticamente cada vez que el temporizador
+ * expira, es decir, cada SAMPLE_PERIOD_MS (milisegundos).
+ * 
+ * Su función principal es leer el valor del ADC y registrarlo en el monitor
+ * serie.
+ * 
+ * @param[in] pxTimer Este es un manejador del temporizador freeRTOS
+ * en esta ocación no es usado pero podria servir para obtener información 
+ * del temporizador si hubiera varios activos.
+ * 
+ * @return nada.
+ */
 void vTimerCallback(TimerHandle_t pxTimer)
 {
+    // inicializa adc_val en 0 antes de realizar la lectura
     adc_val = 0;
+
+    /**
+     * Se lee el valor del canal ADC especificado.
+     * 
+     * @param[in] adc_handle manejador de la unidad ADC (inicializado en set_adc()).
+     * @param[in] ADC_CHANNEL canal ADC especifico donde esta conectado el sensor
+     * @param[out] adc_val direccion de memoria donde se almacenará el resultado.
+     * 
+     * @return Devuelve un código de error (esp_err_t ret), indicando si la lectura 
+     * fue exitosa (ESP_OK) o falló.
+     */
     esp_err_t ret = adc_oneshot_read(adc_handle, ADC_CHANNEL, &adc_val);
+    
+    /**
+     * Se verifica si la lectura fue exitosa. para ello se emplea la variable ret
+     * la cual toma el valor de ESP_OK en caso positivo.
+     * 
+     * Si la operacion es exitosa se imprime la lectura del sensor en el monitor
+     * serie. Por lo contrario si la lectura falla se imprime el mensaje de error
+     * en el monitor serie
+     */
     if (ret == ESP_OK)
     {
         ESP_LOGI(TAG_ADC, "Lectura del sensor: %d", adc_val);
@@ -1501,8 +1536,34 @@ void app_main(void) {
     
 }
 
+/**
+ * @brief Establecer temporizador del ADC
+ * 
+ * La función set_timer_adc() configura un temporizador en FreeRTOS 
+ * (xTimerCreate) para ejecutar una tarea de lectura del ADC de manera
+ * periodica.
+ * 
+ * @return
+ *      - ESP_OK: Si la operacion es ejecutada exitosamente
+ *      - ESP_FAIL: Si ocurre un error creando el timer
+ */
 esp_err_t set_timer_adc(void)
 {
+    /**
+     * Se crea el handler del timer freeRTOS usando xTimerCreate(). 
+     * Este tiene como parametros:
+     * 
+     * @param[in] pcTimerName nombre del timer
+     * @param[in] xTimerPeriodInTicks periodo del timer en TICKS (en este 
+     * caso se establece en un numero equivalente a 100ms)
+     * @param[in] xAutoReload modo periodico (En este caso está habilitado)
+     * @param[in] pvTimerID ID del temporizador (no se usa en este caso)
+     * @param[out] pxCallbackFunction Función de callback que se ejecuta al
+     * activarse el timer.
+     * 
+     * @return retorna el handler del timer que se acaba de crear
+     * 
+     */
     xTimerADC = xTimerCreate(
         "Timer",
         (pdMS_TO_TICKS(SAMPLE_PERIOD_MS)),
@@ -1510,12 +1571,17 @@ esp_err_t set_timer_adc(void)
         (void *)0,
         vTimerCallback);
 
+    /**
+     * En el caso que no se haya creado correctamente el handler del timer 
+     * se retorna ESP_FAIL y se imprime el mensaje "error creando el timer."
+     */
     if (xTimerADC == NULL)
     {
         ESP_LOGE(TAG_ADC, "Error creando el timer.");
         return ESP_FAIL;
     }
 
+    // Si la operación fue exitosa se retorna ESP_OK
     return ESP_OK;
 }
 
