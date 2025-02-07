@@ -488,7 +488,7 @@ para este caso, el timer se establece con un periodo de 100ms con repetición. L
 
 ##### **3.1.1 Algoritmo del programa**
 
-<img src="assets\img\lectura_sensor_CO2.png" alt="lectura_sensor_CO2" width="900">
+<img src="assets\img\lectura_sensor_CO2.png" alt="lectura_sensor_CO2" width="1000">
 
 ##### **3.1.2 Descripción**
 
