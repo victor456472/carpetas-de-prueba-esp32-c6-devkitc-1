@@ -563,23 +563,7 @@ esp_err_t root_handler(httpd_req_t *req) {
  * información de la direccion IP obtenida. 
  */
 static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
-    /**
-     * El siguiente evento ocurre cuando el Wi-Fi en modo STA ha iniciado y esta listo
-     * para conectarse a una red
-     */
     
-    //if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-    //    /**
-    //     * Muestra un mensaje en el log: "Wi-Fi STA iniciado, conectando ..."
-    //     */
-    //    ESP_LOGI(TAG, "Wi-Fi STA iniciado, conectando...");
-//
-    //    set_led_color(COLOR_YELLOW);
-    //    /**
-    //     * La función esp_wifi_connect() inicia el proceso de conexion Wi-Fi.
-    //     */
-    //    esp_wifi_connect(); // Iniciar la conexión
-    //}
     /**
      * Este evento ocurre cuando el dispositivo pierde la conexión Wi-Fi o no puede
      * conectarse a la red especificada.
@@ -601,7 +585,7 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
          * Se cambia el color del LED RGB a rojo (COLOR RED), indicando que la conexion
          * ha fallado.
          */
-        set_led_color(COLOR_YELLOW);
+        set_led_color(COLOR_RED);
         //apaga la lectura del ADC
         ESP_ERROR_CHECK(stop_timer_adc());
     } 
@@ -700,7 +684,7 @@ void start_WIFI_events(void){
         &instance_any_id
     ));
 }
-void stop_WIFI_events(void){
+void stop_IP_events(void){
     ESP_ERROR_CHECK(esp_event_handler_instance_unregister(
         IP_EVENT, 
         IP_EVENT_STA_GOT_IP, 
@@ -1503,7 +1487,7 @@ void app_main(void) {
     //inicializar controles del adc
     set_adc();
     set_timer_adc();
-    stop_timer_adc();
+    //stop_timer_adc();
 
     // iniciar tarea para revisar boton de reset externo
     xTaskCreate(clean_wifi_sta_connect_credentials, "clean_wifi_sta_connect_credentials", 2048, NULL, 10, NULL);

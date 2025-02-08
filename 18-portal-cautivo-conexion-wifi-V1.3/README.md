@@ -30,6 +30,9 @@
       - [**2.3. Establecer timer del ADC**](#23-establecer-timer-del-adc)
         - [**2.3.1 Algoritmo del programa**](#231-algoritmo-del-programa-1)
         - [**2.3.2 Definición**](#232-definición)
+      - [**2.4. Inicializar led RGB**](#24-inicializar-led-rgb)
+        - [**2.4.1 Algoritmo del programa**](#241-algoritmo-del-programa)
+        - [**2.4.2 Descripción**](#242-descripción)
     - [**3. Capa 3**](#3-capa-3)
       - [**3.1. Lectura del sensor de CO2**](#31-lectura-del-sensor-de-co2)
         - [**3.1.1 Algoritmo del programa**](#311-algoritmo-del-programa)
@@ -477,6 +480,40 @@ Reemplazando los valores de $R3$ y $k$ se encuentra que se requiere una resisten
 Se utiliza un timer de freeRTOS para poder realizar la lectura del ADC de forma periodica y asincronica. el procedimiento para configurar el timer se basa en la creacion de un manejador a través de la función (`xTimerCreate`) la cual permite establecer parametros como el periodo, el reset del timer y la función que se ejecutará una vez expirado el tiempo.
 
 para este caso, el timer se establece con un periodo de 100ms con repetición. La función que se ejecuta con el timer se denomina `vTimerCallBack` y es la encargada de la [lectura del sensor de CO2](#31-lectura-del-sensor-de-co2)
+
+es importante mencionar que los timers deben ser iniciados para que funcionen. En esta funcion simplemente se crea el handler con las configuraciones necesarias para poder iniciar el timer.
+
+#### **2.4. Inicializar led RGB**
+
+[ir a tabla de Contenido](#tabla-de-contenido)
+  
+##### **2.4.1 Algoritmo del programa**
+
+<img src="assets\img\inicializar_led_RGB.png" alt="inicializar_led_RGB" width="800">
+
+##### **2.4.2 Descripción**
+
+La ESP32-C6-DevKitC-1 incorpora un LED RGB de referencia WS2812B. Esta gama de LEDS incorporan un chip de control integrado que permite acoplar varios leds a una sola linea de datos y controlarlos individualmente. Estos LEDS se caracterizan por tener una alta frecuencia de actualizacion, ademas de tener un alto brillo y eficiencia energetica.
+
+La forma en la cual se controla este LED es a traves de un protocolo de comunacion serie el cual emplea 24 bits de datos: 8 para la asignacion del color verde, 8 para la asignacion del color rojo y 8 para la asignacion del color azul.
+
+<img src="assets\img\protocolo_comunicacion_led.png" alt="protocolo_comunicacion_led" width="600">
+
+cada byte puede establecer un nivel de intensidad entre 0 y 255.
+
+***Nota:*** *revisar [datasheet del WS2812B](https://www.alldatasheet.com/datasheet-pdf/view/1179113/WORLDSEMI/WS2812B.html)*
+
+Por fortuna, la libreria ubicada en [include/led_strip.h](include/led_strip.h) permite manejar facilmente la comunicacion con el LED a través del canal RMT. esta libreria establece una estructura de control con la función `led_init_strip()` que recibe como parametros:
+
+1. canal RMT para controlar el color del LED
+2. GPIO al cual está conectado el pin de datos del LED. Para el ESP32-C6-DevKitC-1 este es el GPIO8.
+3. El numero de leds conectados al pin de datos. en este caso solo hay un LED.
+
+cuando se crea la estructura, es posible acceder a los metodos que proporciona la libreria para controlar el led. Para esta función `init_led_strip()` simplemente se usa el metodo `clear()` que borra cualquier color que haya sido establecido en el LED con programas anteriores.
+
+si se desea conocer mas sobre el hardware que rodea al LED en la ESP32 se recomienda visitar el [diagrama circuital de la ESP32-C6-DevKitC-1](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32/_static/esp32-c6-devkitc-1/schematics/esp32-c6-devkitc-1-schematics_v1.4.pdf)
+
+
 
 ### **3. Capa 3**
 
