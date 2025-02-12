@@ -33,6 +33,12 @@
       - [**2.4. Inicializar led RGB**](#24-inicializar-led-rgb)
         - [**2.4.1 Algoritmo del programa**](#241-algoritmo-del-programa)
         - [**2.4.2 Descripción**](#242-descripción)
+      - [**2.5. Inicializar sistema de archivos SPIFFS**](#25-inicializar-sistema-de-archivos-spiffs)
+        - [**2.5.1 Algoritmo del programa**](#251-algoritmo-del-programa)
+        - [**2.5.2 Descripción**](#252-descripción)
+      - [**2.6. establecer modo AP+STA**](#26-establecer-modo-apsta)
+        - [**2.6.1 Algoritmo del programa**](#261-algoritmo-del-programa)
+        - [**2.6.2 Descripción**](#262-descripción)
     - [**3. Capa 3**](#3-capa-3)
       - [**3.1. Lectura del sensor de CO2**](#31-lectura-del-sensor-de-co2)
         - [**3.1.1 Algoritmo del programa**](#311-algoritmo-del-programa)
@@ -513,7 +519,40 @@ cuando se crea la estructura, es posible acceder a los metodos que proporciona l
 
 si se desea conocer mas sobre el hardware que rodea al LED en la ESP32 se recomienda visitar el [diagrama circuital de la ESP32-C6-DevKitC-1](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32/_static/esp32-c6-devkitc-1/schematics/esp32-c6-devkitc-1-schematics_v1.4.pdf)
 
+#### **2.5. Inicializar sistema de archivos SPIFFS**
 
+[ir a tabla de Contenido](#tabla-de-contenido)
+
+##### **2.5.1 Algoritmo del programa**
+
+<img src="assets\img\Iniciar_spiffs.png" alt="Iniciar_spiffs" width="800">
+
+
+##### **2.5.2 Descripción**
+
+SPIFFS (SPI Flash File System) es un sistema de archivos ligero y diseñado para memorias Flash SPI NOR, como las que usan las placas ESP32 y ESP8266.
+Permite almacenar, leer, escribir y gestionar archivos en la memoria Flash de la ESP32, funcionando como una unidad de almacenamiento. En este caso, el sistema se usara para almacenar archivos html, css, js, imagenes, entre otros recursos necesarios para el funcionamiento del portal cautivo.
+
+Para poder inicializar este sistema es necesario configurar algunos parametros importantes:
+
+| **Campo**                  | **Descripción** |
+|----------------------------|----------------|
+| `.base_path`               | Define el punto de montaje del sistema de archivos. Todos los archivos almacenados en SPIFFS estarán accesibles desde esta ruta. Ejemplo: `"/spiffs"`. |
+| `.partition_label`         | Especifica el nombre de la partición SPIFFS en la tabla de particiones. Si se establece en `NULL`, se usará la partición predeterminada para SPIFFS. |
+| `.max_files`               | Número máximo de archivos que pueden abrirse simultáneamente. Un valor común es `5`, dependiendo de la memoria disponible. |
+| `.format_if_mount_failed`  | Si es `true`, la ESP32 intentará **formatear la partición** en caso de que falle el montaje del sistema de archivos. Esto ayuda a recuperar SPIFFS en caso de corrupción. |
+
+#### **2.6. establecer modo AP+STA**
+
+[ir a tabla de Contenido](#tabla-de-contenido)
+
+##### **2.6.1 Algoritmo del programa**
+
+<img src="assets\img\establecer_AP_STA.png" alt="establecer_AP_STA" width="1000">
+
+##### **2.6.2 Descripción**
+
+Esta sección está en construcción ...
 
 ### **3. Capa 3**
 

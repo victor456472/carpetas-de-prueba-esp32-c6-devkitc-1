@@ -1190,9 +1190,41 @@ void wifi_set_AP(void) {
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
 }
 
+/**
+ * @brief Establecer en modo AP+STA
+ * 
+ * Configura la ESP32 oara funcionar en modo Wi-Fi AP+STA permitiendo:
+ * 1) Hacer que otros dispositivos puedan conectarse a la ESP32
+ * 2) Actuar como un cliente en una red
+ * 
+ * Esta funcion tiene la particularidad de manejar correctamente los
+ * cambios de modo Wi-Fi asi como reiniciar las interfaces de red en
+ * caso de ser necesario.
+ * 
+ * @return Nada
+ */
 void wifi_set_AP_STA(void) {
+
+    /**
+     * Se imprime en el monitor serie un mensaje informativo indicando que el
+     * wifi esta siendo configurado en modo AP+STA.
+     */
     ESP_LOGI(TAG, "Iniciando Wi-Fi en modo AP+STA...");
 
+    /**
+     * Se establece un condicional que evalue el estado actual del Wi-Fi
+     * mediante la función esp_wifi_get_mode() la cual devuelve el estado
+     * en la variable "current_mode".
+     * 
+     * de esta forma, si la ESP32 estaba en modo STA cuando se invoco esta
+     * función, Se detiene la conexion actual con esp_wifi_stop() y se
+     * agrega un pequeño retardo con vTaskDelay() para evitar conflictos
+     * en la reconfiguracion.
+     * 
+     * en caso que no se pueda obtener el estado se imprime una advertencia
+     * pero se sigue con la configuración. esto es util si la ESP32 no habia
+     * creado una interfaz previa.
+     */
     wifi_mode_t current_mode;
     if (esp_wifi_get_mode(&current_mode) == ESP_OK) {
         // **Si está en modo STA, detener Wi-Fi antes de cambiar a AP+STA**
@@ -1205,8 +1237,16 @@ void wifi_set_AP_STA(void) {
         ESP_LOGW(TAG, "No se pudo obtener el modo Wi-Fi. Continuando con la configuración...");
     }
 
+    /**
+     * Con la función esp_wifi_set_mode() se establece que el Wi-Fi cambie a 
+     * modo AP+STA usando la macro WIFI_MODE_APSTA
+     */
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
 
+    /**
+     * En el caso de que exista alguna interfaz de red previa (AP o STA), esta 
+     * se destruye para prevenir fugas de memoria y conflictos de reconfiguracón.
+     */
     if (ap_netif) {
         esp_netif_destroy(ap_netif);
         ap_netif = NULL;
@@ -1216,10 +1256,24 @@ void wifi_set_AP_STA(void) {
         sta_netif = NULL;
     }
 
-    // **Crear nuevas interfaces**
+    /**
+     * Se crean las interfaces AP y STA usando las funciones 
+     * esp_netif_create_...()
+     */
     ap_netif = esp_netif_create_default_wifi_ap();
     sta_netif = esp_netif_create_default_wifi_sta();
-
+    
+    /**
+     * Se arma la estructura de configuración del AP. esta estructura contiene
+     * los siguientes parametros:
+     * 
+     * @param[in] ssid Nombre del wifi creado por la ESP32
+     * @param[in] password contraseña de la red AP
+     * @param[in] ssid_len longitud del ssid
+     * @param[in] channel canal Wi-Fi en el que operará el AP
+     * @param[in] max_connection máximo numero de dispositivos que pueden conectarse
+     * @param[in] authmode modo de autenticación (WPA/WPA2)
+     */
     wifi_config_t wifi_config = {
         .ap = {
             .ssid = AP_SSID,
@@ -1231,15 +1285,34 @@ void wifi_set_AP_STA(void) {
         },
     };
 
+    /**
+     * En caso de que la cadena de la contraseña este vacia, se cambia el authmode en 
+     * "modo abierto" donde el cliente no debe autenticarse con contraseña.
+     */
     if (strlen(AP_PASSWORD) == 0) {
             wifi_config.ap.authmode = WIFI_AUTH_OPEN;
-        }
+    }
 
+    /**
+     * Se configura la ESP32 como punto de acceso con los parametros 
+     * definidos en wifi_conf
+     */
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
+
+    //Se inicia el Wi-Fi con la nueva configuración (modo AP+STA)
     ESP_ERROR_CHECK(esp_wifi_start());
 
+    //Se imprime el SSID del AP en el monitor serie
     ESP_LOGI(TAG, "interfaz de configuración activa con SSID: %s", AP_SSID);
-    // Se enciende el LED RGB en color Cyan indicando que el ESP32 está en modo AP
+    
+    //Se comprueba el estado del Wi-Fi y se imprime en monitor serie
+    esp_wifi_get_mode(&current_mode);
+    ESP_LOGI(TAG, "Modo Wi-Fi actual: %d", current_mode);
+    
+    /**
+     * Se enciende el LED RGB en color Cyan indicando que el portal cautivo
+     * está activo.
+     */
     set_led_color(COLOR_CYAN);
 }
 
@@ -1304,30 +1377,6 @@ void wifi_system_init(void){
     //inicializa el controlador Wi-Fi con la configuración establecida.
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
-}
-
-
-
-// Inicializar Portal cautivo
-/**
- * @brief Inicializa el Wi-Fi en modo Access Point (AP).
- *
- * Esta función configura y inicia el Wi-Fi en modo AP, utilizando las constantes
- * AP_SSID y AP_PASSWORD para establecer el nombre de la red y la contraseña.
- * También establece el canal, el número máximo de conexiones simultáneas y el
- * modo de autenticación según la longitud de la contraseña.
- *
- * @note Esta función utiliza las funciones y estructuras de ESP-IDF para la
- * gestión del Wi-Fi.
- *
- * @return Nada.
- */
-void start_captive_portal(void) {
-
-    wifi_set_AP_STA();
-    wifi_mode_t current_mode;
-    esp_wifi_get_mode(&current_mode);
-    ESP_LOGI(TAG, "Modo Wi-Fi actual: %d", current_mode);
 }
 
 /**
@@ -1487,7 +1536,6 @@ void app_main(void) {
     //inicializar controles del adc
     set_adc();
     set_timer_adc();
-    //stop_timer_adc();
 
     // iniciar tarea para revisar boton de reset externo
     xTaskCreate(clean_wifi_sta_connect_credentials, "clean_wifi_sta_connect_credentials", 2048, NULL, 10, NULL);
@@ -1510,7 +1558,7 @@ void app_main(void) {
     } else {
         // Si no hay credenciales, iniciar en modo AP
         init_spiffs();
-        start_captive_portal();
+        wifi_set_AP_STA();
         // Deshabilitar el ahorro de energía para un escaneo más preciso
         ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
         start_http_server();
