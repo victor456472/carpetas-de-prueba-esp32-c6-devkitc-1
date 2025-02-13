@@ -1095,6 +1095,12 @@ void start_http_server(void) {
     /**
      * @brief inicia el servidor HTTP con la configuracion especificada
      * (config) y asigna el manejador al puntero (server)
+     * 
+     * En caso que la función httpd_start() tenga exito devuelve ESP_Ok y se cumple
+     * la condición del if.
+     * 
+     * En caso que ocurra un error el condicional no se cumplirá y 
+     * se imprimirá un mensaje de error en la terminal a traves de ESO_LOG()
      */
     if (httpd_start(&server, &config) == ESP_OK) {
         /**
@@ -1122,7 +1128,9 @@ void start_http_server(void) {
 
         /**
          * Configura y registra un manejador para la ruta /submit la cual
-         * se usa cuando el cliente presiona el boton "Enviar".
+         * se usa cuando el cliente presiona el boton "Enviar" en una pagina
+         * web alojada en la ESP32. En este caso se procesa la solicitud con
+         * submit_handle()
          */
         httpd_uri_t submit = {
             .uri = "/submit",
@@ -1142,7 +1150,13 @@ void start_http_server(void) {
             .user_ctx = NULL
         };
         httpd_register_uri_handler(server, &redirect);
-
+        
+        /**
+         * Este registro permite servir un archivo script.js almacenado en 
+         * SPIFFS si la página HTML de la ESP32 incluye:
+         * 
+         * <script src="/script.js"></script>
+         */
         httpd_uri_t script = {
             .uri = "/script.js",
             .method = HTTP_GET,
@@ -1151,6 +1165,11 @@ void start_http_server(void) {
         };
         httpd_register_uri_handler(server, &script);
 
+        /**
+         * Esta ruta permite realizar un escaneo de redes wi-fi disponibles,
+         * cuando el cliente accede a /scan, el manejador scan_handler() devuelve un JSON
+         * con la lista de redes.
+         */
         httpd_uri_t scan = {
             .uri = "/scan",
             .method = HTTP_GET,

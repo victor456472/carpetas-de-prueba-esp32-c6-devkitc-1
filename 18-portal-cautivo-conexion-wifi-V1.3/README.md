@@ -36,15 +36,17 @@
       - [**2.5. Inicializar sistema de archivos SPIFFS**](#25-inicializar-sistema-de-archivos-spiffs)
         - [**2.5.1 Algoritmo del programa**](#251-algoritmo-del-programa)
         - [**2.5.2 Descripción**](#252-descripción)
-      - [**2.6. establecer modo AP+STA**](#26-establecer-modo-apsta)
+      - [**2.6. Establecer modo AP+STA**](#26-establecer-modo-apsta)
         - [**2.6.1 Algoritmo del programa**](#261-algoritmo-del-programa)
         - [**2.6.2 Descripción**](#262-descripción)
+      - [**2.7. Inicializar servidor web**](#27-inicializar-servidor-web)
+        - [**2.7.1 Algoritmo del programa**](#271-algoritmo-del-programa)
+        - [**2.7.2 Descripción**](#272-descripción)
     - [**3. Capa 3**](#3-capa-3)
       - [**3.1. Lectura del sensor de CO2**](#31-lectura-del-sensor-de-co2)
         - [**3.1.1 Algoritmo del programa**](#311-algoritmo-del-programa)
         - [**3.1.2 Descripción**](#312-descripción)
     - [**4. Capa 4**](#4-capa-4)
-    - [**1. Inicializar SPIFFS**](#1-inicializar-spiffs)
     - [**2. Inicializar servidor web (modificado)**](#2-inicializar-servidor-web-modificado)
 
 
@@ -533,7 +535,7 @@ si se desea conocer mas sobre el hardware que rodea al LED en la ESP32 se recomi
 SPIFFS (SPI Flash File System) es un sistema de archivos ligero y diseñado para memorias Flash SPI NOR, como las que usan las placas ESP32 y ESP8266.
 Permite almacenar, leer, escribir y gestionar archivos en la memoria Flash de la ESP32, funcionando como una unidad de almacenamiento. En este caso, el sistema se usara para almacenar archivos html, css, js, imagenes, entre otros recursos necesarios para el funcionamiento del portal cautivo.
 
-Para poder inicializar este sistema es necesario configurar algunos parametros importantes:
+El sistema de archivos SPIFFS se registra con el Virtual File System (VFS) del ESP32 usando una estructura que contiene los siguientes parametros:
 
 | **Campo**                  | **Descripción** |
 |----------------------------|----------------|
@@ -542,7 +544,17 @@ Para poder inicializar este sistema es necesario configurar algunos parametros i
 | `.max_files`               | Número máximo de archivos que pueden abrirse simultáneamente. Un valor común es `5`, dependiendo de la memoria disponible. |
 | `.format_if_mount_failed`  | Si es `true`, la ESP32 intentará **formatear la partición** en caso de que falle el montaje del sistema de archivos. Esto ayuda a recuperar SPIFFS en caso de corrupción. |
 
-#### **2.6. establecer modo AP+STA**
+Esto permite que el acceso a SPIFFS se realice a través de las funciones estándar de C, como fopen, fwrite, fread, etc.
+
+El programa intenta montar la partición SPIFFS:
+
+* Si el montaje falla y `format_if_mount_failed` es `true`, formatea la partición automáticamente.
+* Si todo es exitoso, permite al sistema acceder a los archivos en el prefijo `/spiffs`.
+
+para mayor informacion puede revisar los comentarios en
+la funcion `init_spiffs()` del archivo `src/main.c`.
+
+#### **2.6. Establecer modo AP+STA**
 
 [ir a tabla de Contenido](#tabla-de-contenido)
 
@@ -552,7 +564,88 @@ Para poder inicializar este sistema es necesario configurar algunos parametros i
 
 ##### **2.6.2 Descripción**
 
+La función `wifi_set_AP_STA()` configura la ESP32 en modo Wi-Fi AP+STA, lo que permite que el dispositivo actúe simultáneamente como un punto de acceso y como un cliente de una red Wi-Fi existente. Esto es útil en aplicaciones donde la ESP32 debe estar conectada a una red mientras permite la conexión de otros dispositivos para configuración o comunicación local.
+
+La función inicia con un mensaje informativo indicando que el proceso de configuración del Wi-Fi en modo AP+STA ha comenzado. Luego, se obtiene el modo Wi-Fi actual utilizando `esp_wifi_get_mode(&current_mode)`. Si esta llamada es exitosa, el valor de `current_mode` permitirá conocer en qué estado se encuentra la ESP32 antes de hacer cambios en la configuración. Si el dispositivo está en modo `WIFI_MODE_STA`, se detiene el Wi-Fi con `esp_wifi_stop()` antes de proceder con la nueva configuración. Se añade un retraso de 500 ms mediante `vTaskDelay(pdMS_TO_TICKS(500))` para evitar problemas durante la reconfiguración.
+
+En caso de que `esp_wifi_get_mode()` no devuelva `ESP_OK`, se imprime una advertencia, pero el código continúa con la configuración. Esto permite que el sistema continúe funcionando incluso si no se pudo obtener el estado del Wi-Fi.
+
+El siguiente paso es cambiar el modo Wi-Fi a `WIFI_MODE_APSTA` utilizando `esp_wifi_set_mode(WIFI_MODE_APSTA)`, lo que habilita la coexistencia del modo punto de acceso y estación en la ESP32. Antes de continuar, se verifica si ya existen interfaces de red (`ap_netif` y `sta_netif`), y en caso afirmativo, se eliminan con `esp_netif_destroy()`. Esto es necesario para evitar conflictos y asegurar que las interfaces se creen correctamente antes de iniciar el Wi-Fi.
+
+Las nuevas interfaces de red se crean con `esp_netif_create_default_wifi_ap()` y `esp_netif_create_default_wifi_sta()`, que configuran las interfaces de red por defecto para el punto de acceso y el modo estación, respectivamente. Una vez creadas las interfaces, se configura la red AP mediante la estructura `wifi_config_t`. En esta estructura se define el SSID (`AP_SSID`), la contraseña (`AP_PASSWORD`), la longitud del SSID, el canal Wi-Fi en el que operará el punto de acceso, el número máximo de dispositivos conectados simultáneamente (`MAX_STA_CONN`) y el modo de autenticación (`WIFI_AUTH_WPA_WPA2_PSK`). Si la contraseña está vacía, se cambia el modo de autenticación a `WIFI_AUTH_OPEN`, lo que permite la creación de una red sin contraseña. a continuación se resumen los parametros de configuración del AP:
+
+| **Parámetro**      | **Descripción** |
+|--------------------|----------------|
+| `AP_SSID`         | Nombre de la red Wi-Fi creada por la ESP32. |
+| `AP_PASSWORD`     | Contraseña del punto de acceso. Si está vacía, el AP será abierto. |
+| `ssid_len`        | Longitud del SSID (calculado automáticamente con `strlen(AP_SSID)`). |
+| `channel`         | Canal Wi-Fi en el que operará el AP (por defecto 1). |
+| `max_connection`  | Número máximo de dispositivos conectados simultáneamente. |
+| `authmode`        | Modo de autenticación (`WIFI_AUTH_WPA_WPA2_PSK` o `WIFI_AUTH_OPEN` si no hay contraseña). |
+
+
+La configuración del punto de acceso se aplica con `esp_wifi_set_config(WIFI_IF_AP, &wifi_config)`, asegurando que el punto de acceso se inicie con los parámetros definidos. Luego, el Wi-Fi se inicia con `esp_wifi_start()`, permitiendo que la ESP32 funcione en modo AP+STA. Se imprime un mensaje indicando que la interfaz de configuración está activa y se vuelve a obtener el modo Wi-Fi para confirmar el estado de la conexión.
+
+Finalmente, la función enciende el LED RGB en color cian mediante `set_led_color(COLOR_CYAN)`, lo que indica visualmente que la ESP32 se encuentra en modo AP+STA. Esto permite que el usuario pueda reconocer el estado del dispositivo de manera inmediata.
+
+El flujo de la función sigue una estructura que garantiza una transición estable entre los diferentes modos Wi-Fi. Se toman precauciones para evitar conflictos de configuración, asegurando que las interfaces de red sean destruidas y creadas de manera controlada. Además, la configuración del AP es flexible, permitiendo que el SSID y la contraseña sean personalizados o incluso dejando la red abierta si se requiere.
+
+El uso de `ESP_LOGI()` y `ESP_LOGW()` facilita la depuración del código, proporcionando información en tiempo real sobre el estado de la conexión Wi-Fi. En caso de que se produzcan errores durante la configuración, estos se registran en la consola, lo que permite identificar y solucionar problemas de manera más sencilla.
+
+La función `wifi_set_AP_STA()` es ideal para escenarios en los que se necesita que la ESP32 se conecte a una red Wi-Fi mientras proporciona una interfaz de acceso local. Esto es útil en aplicaciones de IoT, configuraciones iniciales de dispositivos embebidos y redes locales donde los usuarios pueden conectarse directamente a la ESP32 para control o configuración. La correcta gestión de las interfaces y la seguridad del punto de acceso garantizan un funcionamiento estable y eficiente del sistema.
+
+#### **2.7. Inicializar servidor web**
+
+[ir a tabla de Contenido](#tabla-de-contenido)
+
+##### **2.7.1 Algoritmo del programa**
+
 Esta sección está en construcción ...
+
+##### **2.7.2 Descripción**
+
+La función `start_http_server()` inicializa un servidor HTTP en la ESP32 utilizando la API `esp_http_server` de ESP-IDF. Este servidor permite a los clientes interactuar con la ESP32 a través de peticiones HTTP, facilitando la comunicación con dispositivos IoT y aplicaciones web.
+
+El servidor maneja múltiples rutas, sirviendo contenido HTML, archivos JavaScript y permitiendo la interacción con la red Wi-Fi de la ESP32.
+
+**Flujo de ejecución**
+
+1. **Se inicializa la configuración del servidor HTTP** usando `HTTPD_DEFAULT_CONFIG()`.
+2. **Se crea un manejador de servidor (`httpd_handle_t`) para registrar rutas.**
+3. **Se inicia el servidor HTTP con `httpd_start()`**.
+4. **Se registran los manejadores de URI (`httpd_register_uri_handler()`)**:
+   - `/` → Página principal.
+   - `/submit` → Recibe datos de formularios.
+   - `/script.js` → Carga un archivo JavaScript desde SPIFFS.
+   - `/scan` → Escanea redes Wi-Fi disponibles.
+   - `/*` → Redirige cualquier ruta desconocida.
+
+5. **Si el servidor no se inicia correctamente, se imprime un error.**
+
+Una vez iniciado el servidor HTTP en la ESP32, se puede probar las rutas usando curl o un navegador.
+
+**para verificar el servidor:**
+```bash
+curl http://192.168.4.1/
+```
+Esto devuelve el contenido de la página principal.
+
+**Para enviar datos al servidor**
+```bash
+curl "http://192.168.4.1/submit?SSID=MiRed&PASSWORD=12345678"
+```
+Esto envía datos de configuración Wi-Fi.
+
+**Para escanear redes Wi-Fi**
+```bash
+curl http://192.168.4.1/scan
+```
+Esto devuelve un JSON con la lista de redes Wi-Fi detectadas.
+
+**Referencias**
+
+* [ESP-IDF HTTP Server API](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/protocols/esp_http_server.html#:~:text=The%20HTTP%20Server%20component%20provides%20an%20ability%20for,to%20use%20the%20API%20exposed%20by%20HTTP%20Server%3A)
+* [Ejemplo de servidor web en ESP-IDF](https://github.com/espressif/esp-idf/tree/master/examples/protocols/http_server)
 
 ### **3. Capa 3**
 
@@ -578,42 +671,6 @@ Esta sección está en construcción ...
 ### **4. Capa 4**
 
 [ir a tabla de Contenido](#tabla-de-contenido)
-
-### **1. Inicializar SPIFFS**
-
-Estructura de la función:
-
-<img src="assets\img\Imagen2.png" alt="Diagrama_2_" width="600">
-
-El sistema de archivos SPIFFS se registra con el Virtual File System (VFS) del ESP32 usando una estructura. Esto permite que el acceso a SPIFFS se realice a través de las funciones estándar de C, como fopen, fwrite, fread, etc.
-
-**descripcion de los campos de la estructura**
-
-- base_path (tipo: const char*): 
-    - Especifica el punto de montaje en el sistema de archivos.
-    - Este es el prefijo que usarás para acceder a los archivos almacenados en SPIFFS. Por ejemplo, si base_path es /spiffs, un archivo llamado config.txt será accesible como /spiffs/config.txt.
-
-- partition_label (tipo: const char*): 
-    - Define la etiqueta de la partición SPIFFS en la tabla de particiones.
-    - Si se deja como NULL, se utiliza la partición predeterminada configurada en la tabla de particiones del ESP32.
-    - Esto es útil si tienes múltiples particiones SPIFFS y deseas especificar cuál usar.
-
-- max_files (tipo: size_t): 
-    - Número máximo de archivos que se pueden abrir simultáneamente en SPIFFS.
-    - Por ejemplo, si estableces max_files a 5, solo se podrán abrir 5 archivos al mismo tiempo.
-
-- format_if_mount_failed (tipo: bool): 
-    - Indica si el sistema debe formatear la partición si falla al intentar montarla.
-    - Si es true, SPIFFS intentará formatear la partición y luego volver a montarla automáticamente.
-    - Si es false, se registrará un error sin intentar formatear.
-
-al final, se intenta montar la partición SPIFFS:
-
-1. Si el montaje falla y format_if_mount_failed es true, formatea la partición automáticamente.
-2. Si todo es exitoso, permite al sistema acceder a los archivos en el prefijo /spiffs.
-
-para mayor informacion puede revisar los comentarios en
-la funcion init_spiffs() del archivo src/main.c
 
 ### **2. Inicializar servidor web (modificado)**
 
