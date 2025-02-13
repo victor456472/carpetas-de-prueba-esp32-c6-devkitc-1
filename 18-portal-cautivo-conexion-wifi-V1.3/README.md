@@ -42,6 +42,9 @@
       - [**2.7. Inicializar servidor web**](#27-inicializar-servidor-web)
         - [**2.7.1 Algoritmo del programa**](#271-algoritmo-del-programa)
         - [**2.7.2 Descripción**](#272-descripción)
+      - [**2.8. Iniciar eventos wi-fi**](#28-iniciar-eventos-wi-fi)
+        - [**2.8.1 Algoritmo del programa**](#281-algoritmo-del-programa)
+        - [**2.8.2 Descripción**](#282-descripción)
     - [**3. Capa 3**](#3-capa-3)
       - [**3.1. Lectura del sensor de CO2**](#31-lectura-del-sensor-de-co2)
         - [**3.1.1 Algoritmo del programa**](#311-algoritmo-del-programa)
@@ -646,6 +649,112 @@ Esto devuelve un JSON con la lista de redes Wi-Fi detectadas.
 
 * [ESP-IDF HTTP Server API](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/protocols/esp_http_server.html#:~:text=The%20HTTP%20Server%20component%20provides%20an%20ability%20for,to%20use%20the%20API%20exposed%20by%20HTTP%20Server%3A)
 * [Ejemplo de servidor web en ESP-IDF](https://github.com/espressif/esp-idf/tree/master/examples/protocols/http_server)
+
+#### **2.8. Iniciar eventos wi-fi**
+
+[ir a tabla de Contenido](#tabla-de-contenido)
+
+##### **2.8.1 Algoritmo del programa**
+
+Esta sección está en construcción...
+
+##### **2.8.2 Descripción**
+
+La función `start_WIFI_events()` registra un manejador de eventos Wi-Fi en la ESP32 utilizando el sistema de eventos de ESP-IDF. Esto permite que la ESP32 **reaccione automáticamente** a eventos de conexión y desconexión, sin necesidad de consultar manualmente el estado de la red.
+
+Esta funcionalidad es útil en aplicaciones IoT donde es necesario que la ESP32 se reconecte automáticamente si pierde la conexión Wi-Fi o maneje dispositivos que se conectan a su punto de acceso.
+
+---
+
+**Flujo de Ejecución**
+1. **Registra un manejador de eventos Wi-Fi** con `esp_event_handler_instance_register()`.
+2. **Especifica que capturará cualquier evento Wi-Fi (`ESP_EVENT_ANY_ID`)**.
+3. **Asigna `event_handler()` como función manejadora** para procesar eventos.
+4. **Guarda la instancia del manejador en `instance_any_id`** para poder desregistrarlo si es necesario.
+
+---
+**Código Explicado**
+```c
+void start_WIFI_events(void) {
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(
+        WIFI_EVENT,                // Captura eventos Wi-Fi
+        ESP_EVENT_ANY_ID,          // Captura cualquier ID de evento Wi-Fi
+        &event_handler,            // Función encargada de manejar los eventos
+        NULL,                      // No se pasa contexto adicional
+        &instance_any_id           // Guarda la instancia del manejador
+    ));
+}
+```
+* `WIFI_EVENT`: Indica que estamos registrando eventos relacionados con la red Wi-Fi.
+* `ESP_EVENT_ANY_ID`: Permite capturar cualquier evento Wi-Fi, sin necesidad de registrarlos individualmente.
+* `&event_handler`: Apunta a la función que manejará los eventos Wi-Fi.
+* `NULL`: No se pasa información adicional a event_handler().
+* `&instance_any_id`: Guarda la instancia del manejador para poder desregistrarlo más tarde si es necesario.
+
+---
+**Eventos wifi manejados**
+
+La función `start_WIFI_events()` permite capturar múltiples eventos de Wi-Fi en la ESP32, los cuales son procesados por event_handler().
+
+| **Evento**                     | **Descripción** |
+|---------------------------------|----------------|
+| `WIFI_EVENT_STA_START`          | Se inicia la conexión Wi-Fi en modo STA. |
+| `WIFI_EVENT_STA_CONNECTED`      | La ESP32 se conectó a una red Wi-Fi. |
+| `WIFI_EVENT_STA_DISCONNECTED`   | Se perdió la conexión Wi-Fi. |
+| `WIFI_EVENT_AP_START`           | El punto de acceso (AP) se inició. |
+| `WIFI_EVENT_AP_STOP`            | El punto de acceso (AP) se detuvo. |
+| `WIFI_EVENT_AP_STACONNECTED`    | Un dispositivo se conectó al AP de la ESP32. |
+| `WIFI_EVENT_AP_STADISCONNECTED` | Un dispositivo se desconectó del AP de la ESP32. |
+
+Estos eventos son capturados y procesados por `event_handler()`, permitiendo que la ESP32 reaccione en tiempo real a cambios en la red.
+
+---
+**Ejemplo de uso**
+
+Para que la ESP32 maneje eventos Wi-Fi, es necesario registrar la función en la configuración del Wi-Fi.
+Un ejemplo típico de uso en `app_main()` sería:
+
+```c
+void app_main(void) {
+    // Configurar Wi-Fi con valores por defecto
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    esp_wifi_init(&cfg);
+
+    // Registrar eventos Wi-Fi
+    start_WIFI_events();
+
+    // Configurar en modo estación (STA)
+    esp_wifi_set_mode(WIFI_MODE_STA);
+    esp_wifi_start();
+}
+```
+Esto permite que la ESP32:
+* Detecte automáticamente eventos de conexión y desconexión Wi-Fi.
+* Reaccione cuando se pierda la conexión (`WIFI_EVENT_STA_DISCONNECTED`).
+* Maneje dispositivos que se conectan a su punto de acceso (`WIFI_EVENT_AP_STACONNECTED`).
+
+---
+**Ejemplo de Manejador de Eventos (event_handler())**
+
+```c
+static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        ESP_LOGI("WiFi", "Conexión Wi-Fi perdida, intentando reconectar...");
+        esp_wifi_connect();  // Intentar reconectar automáticamente
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
+        ESP_LOGI("WiFi", "Conectado a la red Wi-Fi.");
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STACONNECTED) {
+        ESP_LOGI("WiFi", "Un dispositivo se ha conectado al AP.");
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STADISCONNECTED) {
+        ESP_LOGI("WiFi", "Un dispositivo se ha desconectado del AP.");
+    }
+}
+```
+
+---
+**Referencias**
+
+* [ESP-IDF Event Loop Library](https://docs.espressif.com/projects/esp-idf/en/v5.4/esp32/api-reference/system/esp_event.html)
 
 ### **3. Capa 3**
 

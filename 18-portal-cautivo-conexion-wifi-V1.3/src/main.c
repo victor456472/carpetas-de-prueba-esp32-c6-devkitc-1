@@ -675,7 +675,20 @@ void start_IP_events(void){
     ));
 }
 
+/**
+ * @brief Iniciar eventos Wi-Fi
+ * 
+ * La función start_WIFI_events() registra un manejador de eventos de Wi-Fi 
+ * en la ESP32, permitiendo que la función event_handler() reciba y procese eventos 
+ * relacionados con Wi-Fi (conexión, desconexión, escaneo, etc.).
+ */
 void start_WIFI_events(void){
+    /**
+     * Registra un manejador de eventos, permitiendo que la ESP32 detecte y procese 
+     * eventos específicos.
+     * Esto significa que cada vez que ocurra un evento de Wi-Fi, la función event_handler() 
+     * será ejecutada.
+     */
     ESP_ERROR_CHECK(esp_event_handler_instance_register(
         WIFI_EVENT,
         ESP_EVENT_ANY_ID,
