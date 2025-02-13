@@ -633,16 +633,45 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
     }
 }
 
+/**
+ * @brief Establecer modo estación
+ * 
+ * La función wifi_set_STA() configura la ESP32 en modo estación (STA - Station Mode), 
+ * permitiéndole conectarse a una red Wi-Fi existente. Esta función gestiona correctamente 
+ * los posibles estados del Wi-Fi y garantiza que la configuración se realice de manera 
+ * estable y sin conflictos.
+ */
 void wifi_set_STA(void){
+
+    /**
+     * Imprime en el monitor serie un mensaje informativo indicando que el proceso de 
+     * configuración del modo estación está iniciando.
+     */
     ESP_LOGI(TAG, "Configurando Wi-Fi en modo STA...");
 
-    // **Obtener el estado actual del Wi-Fi**
-    wifi_mode_t mode = WIFI_MODE_NULL; // Inicializar en un estado conocido
+    /**
+     * Se declara la variable mode e inicialmente se establece en WIFI_MODE_NULL 
+     * (sin modo configurado).
+     */
+    wifi_mode_t mode = WIFI_MODE_NULL; 
+
+    /**
+     * Se llama a esp_wifi_get_mode(&mode), que obtiene el modo Wi-Fi actual de 
+     * la ESP32.
+     * 
+     * en caso que la función falle, se imprime una advertencia de que el wifi no ha 
+     * sido iniciado.
+     */
     if (esp_wifi_get_mode(&mode) != ESP_OK) {
         ESP_LOGW(TAG, "No se pudo obtener el modo Wi-Fi. Asegurar que Wi-Fi está iniciado.");
     }
 
-    // **Verificar si la interfaz STA ya existe antes de crear una nueva**
+    /**
+     * Solamente si sta_netif no ha sido creada aún (NULL), se crea la interfaz de red para el 
+     * modo STA usando esp_netif_create_default_wifi_sta().
+     * 
+     * Esto evita crear múltiples interfaces, lo que podría generar fugas de memoria.
+     */
     if (!sta_netif) {
         ESP_LOGI(TAG, "Creando interfaz STA...");
         sta_netif = esp_netif_create_default_wifi_sta();
@@ -650,17 +679,44 @@ void wifi_set_STA(void){
 
     // **Si Wi-Fi no está configurado en ningún modo, forzar modo STA**
     if (mode == WIFI_MODE_NULL) {
+        /**
+         * Si mode == WIFI_MODE_NULL significa que el Wi-Fi no tiene ningún modo activo.
+         * 
+         * Se imprime una advertencia y se configura el modo Wi-Fi en STA con 
+         * esp_wifi_set_mode(WIFI_MODE_STA). Luego, se inicia el Wi-Fi con esp_wifi_start().
+         * 
+         * Esta acción es necesaria puesto que si la ESP32 no tiene configurado el Wi-Fi, 
+         * cualquier intento de conexión fallará. con esta solución se asegura que la ESP32 
+         * esté lista para conectarse a una red.
+         */
         ESP_LOGW(TAG, "Wi-Fi no tiene un modo configurado. Estableciendo modo STA...");
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
         ESP_ERROR_CHECK(esp_wifi_start());
     } else if (mode != WIFI_MODE_STA) {
+        /**
+         * Si la ESP32 está en modo AP (WIFI_MODE_AP) o AP+STA (WIFI_MODE_APSTA), se cambia
+         * a STA usando esp_wifi_set_mode(WIFI_MODE_STA) sin volver a iniciar wifi con 
+         * esp_wifi_start(). Esto evita problemas de conectividad en caso de que la ESP32 
+         * haya sido configurada en otro modo previamente.
+         */
         ESP_LOGW(TAG, "Cambiando Wi-Fi a modo STA...");
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     } else {
+        /**
+         * Si mode == WIFI_MODE_STA, significa que la ESP32 ya está en modo STA.
+         * En este caso, solo se inicia el Wi-Fi con esp_wifi_start(), sin necesidad 
+         * de cambiar el modo.
+         * 
+         * De esta manera se evita reiniciar innecesariamente la configuración si la 
+         * ESP32 ya está en el modo correcto.
+         */
         ESP_LOGI(TAG, "Wi-Fi ya está en modo STA. Iniciando Wi-Fi...");
         ESP_ERROR_CHECK(esp_wifi_start());
     }
-
+    /**
+     * Se indica en el monitor serie que la ESP32 ahora está en modo estación.
+     * A partir de aquí, el dispositivo está listo para conectarse a una red Wi-Fi.
+     */
     ESP_LOGI(TAG, "Modo STA activado");
 }
 
@@ -705,7 +761,7 @@ void stop_IP_events(void){
     ));
 }
 
-void stop_connection_event_handler(void){
+void stop_sta_disconnection_event_handler(void){
     ESP_ERROR_CHECK(esp_event_handler_instance_unregister(
         WIFI_EVENT, 
         WIFI_EVENT_STA_DISCONNECTED, 
@@ -714,19 +770,51 @@ void stop_connection_event_handler(void){
 
 }
 
+/**
+ * @brief conectase a una red (solo para modo STA)
+ * 
+ * La función wifi_connect_STA() intenta conectar la ESP32 a una red Wi-Fi en 
+ * modo estación (STA) utilizando el SSID y la contraseña proporcionados. También 
+ * gestiona el proceso de conexión, incluyendo validaciones, configuración de 
+ * parámetros y espera hasta que la conexión sea establecida o falle después de 
+ * un tiempo límite.
+ * 
+ * @param[in] ssid nombre de la red a la cual debe conectarse
+ * @param[in] password contraseña a la cual debe conectarse
+ * 
+ * @return retorna ESP_OK si la conexión fue exitosa, o ESP_FAIL en caso de fallo
+ */
 esp_err_t wifi_connect_STA(const char *ssid, const char *password) {
+    
+    /**
+     * Imprime en la terminal el nombre de la red a la que se intentará conectar.
+     * Esto facilita la depuración y el seguimiento del estado de conexión.
+     */
     ESP_LOGI(TAG, "Conectando a la red Wi-Fi: %s...", ssid);
+    
+    /**
+     * Llama a start_IP_events(), que registra eventos relacionados 
+     * con la asignación de direcciones IP.
+     */
     start_IP_events();
 
-
+    /**
+     * Se obtiene el modo Wi-Fi actual usando esp_wifi_get_mode(&mode).
+     * Si el Wi-Fi no está en modo STA o AP+STA, se muestra un error y 
+     * se cancela la conexión. Esto previene errores al intentar 
+     * conectarse si la ESP32 está en modo AP (WIFI_MODE_AP)
+     */
     wifi_mode_t mode;
-
     esp_wifi_get_mode(&mode);
     if (mode != WIFI_MODE_STA && mode != WIFI_MODE_APSTA) {
         ESP_LOGE(TAG, "Error: Wi-Fi no está en modo STA o AP+STA. No se puede conectar.");
         return ESP_FAIL;
     }
-    
+
+    /**
+     * Se crea una estructura wifi_config_t que almacena los datos de conexión Wi-Fi en sta (modo estación).
+     * Inicialmente, los campos ssid y password están vacíos.
+     */
     wifi_config_t wifi_config = {
         .sta = {
             .ssid = "",
@@ -734,15 +822,45 @@ esp_err_t wifi_connect_STA(const char *ssid, const char *password) {
         },
     };
 
+    /**
+     * Se copian los valores de ssid y password en la estructura wifi_config.sta de forma 
+     * segura usando strncpy(), lo que evita desbordamiento de memoria.
+     */
     strncpy((char *)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid));
     strncpy((char *)wifi_config.sta.password, password, sizeof(wifi_config.sta.password));
 
+    /**
+     * Se aplica la configuración Wi-Fi al interfaz de estación (WIFI_IF_STA) con 
+     * esp_wifi_set_config().Esto almacena el SSID y la contraseña en el controlador Wi-Fi 
+     * de la ESP32.
+     */
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+    
+    /**
+     * Se muestra un mensaje en la terminal indicando que la ESP32 está intentando conectar.
+     */
     ESP_LOGI(TAG, "Esperando conexión...");
+    
+    /**
+     * El LED se pone en amarillo (COLOR_YELLOW) para indicar el estado de conexión 
+     * en curso.
+     */
     set_led_color(COLOR_YELLOW);
+
+    //Se inicia el proceso de conexión Wi-Fi con esp_wifi_connect()
+
     ESP_ERROR_CHECK(esp_wifi_connect());
 
-    // **Esperar hasta 10 intentos (~10 segundos)**
+    /**
+     * Se implementa un bucle que espera hasta 10 segundos (10 
+     * intentos de 1 segundo) para verificar si la conexión fue exitosa.
+     * 
+     * Cada iteración espera 1 segundo (vTaskDelay(pdMS_TO_TICKS(1000))) 
+     * antes de volver a comprobar el estado de wifi_connected.
+     * 
+     * wifi_connected es una variable global que se actualiza 
+     * cuando la ESP32 se conecta correctamente.
+     */
     
     int intentos = 0;
     while (!wifi_connected && intentos < 10) {
@@ -750,6 +868,15 @@ esp_err_t wifi_connect_STA(const char *ssid, const char *password) {
         intentos++;
     }
 
+    /**
+     * Si wifi_connected == true después de esperar, significa 
+     * que la conexión fue exitosa. En tal caso se inicia start_WIFI_events(), 
+     * lo que permite manejar eventos Wi-Fi como desconexión o reconexión y se
+     * culmina retornando ESP_OK.
+     * 
+     * Si la conexión no se estableció después de 10 segundos, se imprime una 
+     * advertencia y la función retorna ESP_FAIL.
+     */
     if (wifi_connected) {
         start_WIFI_events();
         ESP_LOGI(TAG, "Conexión exitosa a: %s", ssid);

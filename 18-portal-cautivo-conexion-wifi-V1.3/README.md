@@ -45,6 +45,12 @@
       - [**2.8. Iniciar eventos wi-fi**](#28-iniciar-eventos-wi-fi)
         - [**2.8.1 Algoritmo del programa**](#281-algoritmo-del-programa)
         - [**2.8.2 Descripción**](#282-descripción)
+      - [**2.9. Establecer modo STA**](#29-establecer-modo-sta)
+        - [**2.9.1 Algoritmo del programa**](#291-algoritmo-del-programa)
+        - [**2.9.2 Descripción**](#292-descripción)
+      - [**2.10. Conectar a la red**](#210-conectar-a-la-red)
+        - [**2.10.1 Algoritmo del programa**](#2101-algoritmo-del-programa)
+        - [**2.10.2 Descripción**](#2102-descripción)
     - [**3. Capa 3**](#3-capa-3)
       - [**3.1. Lectura del sensor de CO2**](#31-lectura-del-sensor-de-co2)
         - [**3.1.1 Algoritmo del programa**](#311-algoritmo-del-programa)
@@ -750,11 +756,159 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
     }
 }
 ```
-
 ---
 **Referencias**
 
 * [ESP-IDF Event Loop Library](https://docs.espressif.com/projects/esp-idf/en/v5.4/esp32/api-reference/system/esp_event.html)
+
+#### **2.9. Establecer modo STA**
+
+##### **2.9.1 Algoritmo del programa**
+
+Esta sección está en construcción ...
+
+##### **2.9.2 Descripción**
+
+La función `wifi_set_STA()` configura la ESP32 en **modo estación (STA - Station Mode)**, permitiendo que se conecte a una red Wi-Fi existente. La función maneja correctamente la inicialización del Wi-Fi, evitando conflictos con otros modos (`AP` o `AP+STA`).
+
+Esta función es útil en aplicaciones IoT donde la ESP32 necesita conectarse a una red Wi-Fi para enviar datos o recibir comandos de un servidor.
+
+**Flujo de Ejecución**
+1. **Obtiene el estado actual del Wi-Fi** con `esp_wifi_get_mode()`.
+2. **Si la interfaz STA aún no existe, la crea** usando `esp_netif_create_default_wifi_sta()`.
+3. **Si el Wi-Fi no tiene un modo configurado (`NULL`), lo pone en `STA` y lo inicia.**
+4. **Si estaba en otro modo (`AP` o `AP+STA`), cambia a `STA`.**
+5. **Si ya estaba en `STA`, solo inicia el Wi-Fi para evitar configuraciones innecesarias.**
+6. **Muestra en el log que el modo `STA` está activo.**
+
+---
+***Nota:*** *Es posible que antes de llamar a esta función el wifi se encuentre establecido en 4 posibles estados:*
+
+| **Modo**           | **Descripción** |
+|--------------------|----------------|
+| `WIFI_MODE_NULL`  | El Wi-Fi no tiene ningún modo configurado. |
+| `WIFI_MODE_STA`   | La ESP32 está en modo estación (STA). |
+| `WIFI_MODE_AP`    | La ESP32 está en modo punto de acceso (AP). |
+| `WIFI_MODE_APSTA` | La ESP32 está en modo AP+STA. |
+
+*En cualquier caso, la función maneja de manera adecuada el cambio de modo Wi-Fi a STA*
+
+---
+**Ejemplo de uso**
+
+Para que la ESP32 use esta función correctamente, se debe llamar dentro de app_main() o en una configuración inicial:
+
+```c
+void app_main(void) {
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    esp_wifi_init(&cfg);
+
+    wifi_set_STA();  // Configurar modo estación (STA)
+}
+```
+---
+**Ejemplo de conexión wifi**
+
+Para conectar la ESP32 a una red Wi-Fi después de llamar a wifi_set_STA(), puedes hacer lo siguiente:
+
+```c
+void wifi_connect_to_network(const char *ssid, const char *password) {
+    wifi_config_t wifi_config = {
+        .sta = {
+            .ssid = "",
+            .password = "",
+        },
+    };
+
+    strcpy((char*)wifi_config.sta.ssid, ssid);
+    strcpy((char*)wifi_config.sta.password, password);
+
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_connect());
+}
+```
+Esto permite configurar el SSID y la contraseña dinámicamente y conectar la ESP32 a la red Wi-Fi.
+
+---
+
+**Referencias**
+* [Wi-Fi API ESP-IDF](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/network/esp_wifi.html)
+* [Wi-Fi Examples ESP-IDF](https://github.com/espressif/esp-idf/tree/master/examples/wifi/getting_started) 
+
+#### **2.10. Conectar a la red**
+
+[ir a tabla de Contenido](#tabla-de-contenido)
+
+##### **2.10.1 Algoritmo del programa**
+
+Esta sección está en construcción...
+
+##### **2.10.2 Descripción**
+
+La función `wifi_connect_STA()` permite conectar la ESP32 a una red Wi-Fi en **modo estación (STA - Station Mode)** utilizando un SSID y una contraseña proporcionados.  
+
+Esta función:
+- **Valida que el Wi-Fi esté en un modo compatible (`STA` o `AP+STA`)**.
+- **Configura los parámetros de conexión y los almacena en la ESP32**.
+- **Intenta conectar a la red y espera hasta 10 segundos para confirmar la conexión**.
+- **Indica el estado de la conexión en la terminal y con un LED RGB**.
+- **Devuelve `ESP_OK` si la conexión es exitosa o `ESP_FAIL` si falla**.
+
+---
+**Flujo de Ejecución**
+1. **Muestra el SSID al que intentará conectarse** en la terminal.
+2. **Inicia eventos de red** con `start_IP_events()`.
+3. **Obtiene el modo Wi-Fi** con `esp_wifi_get_mode()`, verificando que sea `STA` o `AP+STA`.
+4. **Configura los parámetros de conexión (`wifi_config_t`)** y copia `ssid` y `password` en la estructura.
+5. **Aplica la configuración Wi-Fi (`esp_wifi_set_config()`).**
+6. **Enciende el LED amarillo e intenta conectarse (`esp_wifi_connect()`).**
+7. **Espera hasta 10 intentos (~10 segundos)** verificando si `wifi_connected` cambia a `true`.
+8. **Si la conexión es exitosa, inicia eventos de Wi-Fi con `start_WIFI_events()`.**
+9. **Si la conexión falla, muestra un mensaje de error y retorna `ESP_FAIL`.**
+
+---
+**Ejemplo de uso**
+
+Para que la ESP32 use esta función correctamente, se debe llamar después de inicializar el Wi-Fi y configurar el modo STA:
+
+```c
+void app_main(void) {
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    esp_wifi_init(&cfg);
+
+    wifi_set_STA();  // Configurar modo estación
+
+    if (wifi_connect_STA("MiRedWiFi", "MiContraseña") == ESP_OK) {
+        ESP_LOGI("APP", "Wi-Fi conectado correctamente.");
+    } else {
+        ESP_LOGE("APP", "Error al conectar a Wi-Fi.");
+    }
+}
+```
+Esto asegurará que la ESP32 esté en modo STA antes de conectarse a una red. Si la conexión falla, se muestra un error en la terminal.
+
+---
+**Ejemplo de Manejador de Eventos Wi-Fi**
+
+El estado de `wifi_connected` es actualizado en un manejador de eventos similar a este:
+
+```c
+static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
+        wifi_connected = true;
+        ESP_LOGI("WiFi", "Conectado a la red.");
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        wifi_connected = false;
+        ESP_LOGW("WiFi", "Desconectado. Intentando reconectar...");
+        esp_wifi_connect();
+    }
+}
+```
+Este código mantiene `wifi_connected = true` cuando la ESP32 está conectada, y la reconecta automáticamente si se desconecta.
+
+**Referencias**
+* [Wi-Fi API ESP-IDF](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/network/esp_wifi.html)
+* [Wi-Fi Examples ESP-IDF](https://github.com/espressif/esp-idf/tree/master/examples/wifi/getting_started)
 
 ### **3. Capa 3**
 
