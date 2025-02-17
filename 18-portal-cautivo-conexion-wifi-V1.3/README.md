@@ -242,7 +242,82 @@ Esta sección está en construcción ...
 
 [ir a tabla de Contenido](#tabla-de-contenido)
 
-Esta sección está en construcción ...
+En esta capa se encuentra el codigo principal del programa que se ejecuta cuando la ESP32 es encendida.
+
+La función `app_main()` es el punto de entrada del programa en ESP-IDF. Se encarga de **inicializar y configurar todos los componentes esenciales** de la ESP32, incluyendo:
+
+- **Configuración de Wi-Fi en modo estación (STA) o punto de acceso (AP+STA).**
+- **Lectura de credenciales Wi-Fi almacenadas en la memoria NVS.**
+- **Gestión del ADC y sensores conectados.**
+- **Creación de un servidor web en modo AP para la configuración de red.**
+- **Manejo de un LED RGB para indicar el estado del sistema.**
+
+Si **existen credenciales Wi-Fi guardadas**, la ESP32 se conectará automáticamente en modo `STA`.  
+Si **no hay credenciales**, la ESP32 iniciará un **modo AP con un portal cautivo**, permitiendo a los usuarios configurar la conexión Wi-Fi a través de un navegador.
+
+---
+**Flujo de Ejecución**
+1. **Inicializa el sistema Wi-Fi (`wifi_system_init()`).**
+2. **Configura los GPIOs (`init_gpio()`).**
+3. **Configura el ADC (`set_adc()`) y su temporizador (`set_timer_adc()`).**
+4. **Crea una tarea para gestionar el reseteo de credenciales Wi-Fi.**
+5. **Inicializa el LED RGB (`init_led_strip()`).**
+6. **Intenta leer credenciales Wi-Fi almacenadas en la memoria NVS.**
+7. **Si hay credenciales, inicia en `STA` y se conecta automáticamente.**
+8. **Si no hay credenciales, inicia en `AP+STA` con un portal cautivo.**
+
+---
+**Código Explicado**
+```c
+void app_main(void) {
+    wifi_system_init();  // Inicializar Wi-Fi y NVS
+
+    // Inicializar GPIOs
+    init_gpio();
+
+    // Configurar ADC y temporizador
+    set_adc();
+    set_timer_adc();
+
+    // Crear tarea para resetear credenciales Wi-Fi si es necesario
+    xTaskCreate(clean_wifi_sta_connect_credentials, "clean_wifi_sta_connect_credentials", 2048, NULL, 10, NULL);
+
+    // Inicializar LED RGB para indicar estado del sistema
+    init_led_strip();
+
+    // Variables para almacenar credenciales Wi-Fi
+    char ssid[32] = {0};
+    char password[64] = {0};
+
+    // Leer credenciales desde la memoria NVS
+    wifi_mode_t mode = read_wifi_config_from_nvs(ssid, sizeof(ssid), password, sizeof(password));
+
+    // Si hay credenciales, iniciar en modo STA
+    if (mode == WIFI_MODE_STA && strlen(ssid) > 0 && strlen(password) > 0) {
+        start_WIFI_events();
+        wifi_set_STA();
+        wifi_connect_STA(ssid, password);
+    } 
+    // Si no hay credenciales, iniciar en modo AP con portal cautivo
+    else {
+        init_spiffs();
+        wifi_set_AP_STA();
+        ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));  // Desactivar ahorro de energía
+        start_http_server();
+    }
+}
+```
+---
+**subprogramas asociados**
+Para comprender en su totalidad el funcionamiento del programa principal es necesario revisar los subprogramas que lo componen:
+
+Esta seccion esta en construcción...
+
+---
+**Posibles mejoras**
+Almacenar más de una red wi-fi en NVS y cambiar automaticamente si una red no está disponible.
+
+---
 
 ### **2. Capa 2**
 

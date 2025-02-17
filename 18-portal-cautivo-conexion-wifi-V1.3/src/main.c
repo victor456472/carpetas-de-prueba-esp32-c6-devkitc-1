@@ -1685,6 +1685,18 @@ void vTimerCallback(TimerHandle_t pxTimer)
         ESP_LOGE(TAG_ADC, "Error al leer el ADC: %s", esp_err_to_name(ret));
     }
 }
+
+/**
+ * @brief código principal
+ * 
+ * La función app_main() es el punto de entrada del programa en ESP-IDF y se 
+ * encarga de inicializar y configurar todos los componentes esenciales de la ESP32 
+ * para manejar la conectividad Wi-Fi, el ADC, los GPIOs y el servidor HTTP.
+ * 
+ * Este código configura la ESP32 para operar en modo estación (STA) si ya tiene 
+ * credenciales Wi-Fi almacenadas, o en modo punto de acceso (AP) si no se han 
+ * guardado credenciales. También gestiona sensores, GPIOs y eventos Wi-Fi.
+ */
 void app_main(void) {
 
     wifi_system_init();
@@ -1696,19 +1708,44 @@ void app_main(void) {
     set_adc();
     set_timer_adc();
 
-    // iniciar tarea para revisar boton de reset externo
+    /**
+     * Se crea una tarea en FreeRTOS que revisa si se debe limpiar las credenciales 
+     * Wi-Fi almacenadas en la memoria NVS.
+     * 
+     * Esta tarea se ejecuta en paralelo y está ligada a un botón de reset que, 
+     * si se mantiene presionado durante cierto tiempo, borra las credenciales Wi-Fi.
+     */
     xTaskCreate(clean_wifi_sta_connect_credentials, "clean_wifi_sta_connect_credentials", 2048, NULL, 10, NULL);
 
     // Inicializar LED RGB del ESP32
     init_led_strip();
 
-    // Variables para las credenciales
+    /**
+     * Se crean variables para almacenar el SSID y la contraseña de la red Wi-Fi 
+     * a la que la ESP32 intentará conectarse.
+     * 
+     * El tamaño del SSID es de hasta 32 caracteres y la contraseña hasta 64 caracteres.
+     */
     char ssid[32] = {0};
     char password[64] = {0};
 
-    // Leer el estado de Wi-Fi desde NVS
+    /**
+     * Se intenta leer las credenciales de conexión Wi-Fi almacenadas en la memoria NVS.
+     * Si existen credenciales guardadas, se almacenan en ssid y password.
+     * 
+     * Si la ESP32 se ha conectado antes a una red, estas credenciales estarán disponibles 
+     * y evitarán que el usuario tenga que ingresarlas manualmente.
+     */
     wifi_mode_t mode = read_wifi_config_from_nvs(ssid, sizeof(ssid), password, sizeof(password));
 
+    /**
+     * Se verifica si el Wi-Fi está configurado en modo STA y si las credenciales no 
+     * están vacías. Si las credenciales existen, la ESP32 se conecta automáticamente a la 
+     * red Wi-Fi.
+     * 
+     * Si no hay credenciales, la ESP32 se iniciará en modo AP para que el usuario pueda 
+     * configurar la conexión por medio de un portal cautivo.
+     */
     if (mode == WIFI_MODE_STA && strlen(ssid) > 0 && strlen(password) > 0) {
         // Si hay credenciales, iniciar en modo STA
         start_WIFI_events();
@@ -1722,9 +1759,6 @@ void app_main(void) {
         ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
         start_http_server();
     }
-
-
-    
 }
 
 /**
