@@ -183,7 +183,13 @@ void init_gpio() {
         .intr_type = GPIO_INTR_DISABLE         // Sin interrupciones
     };
     //Aplicar cambios
-    gpio_config(&io_conf);
+    esp_err_t ret = gpio_config(&io_conf);
+    if (ret == ESP_OK) {
+        ESP_LOGI("init_gpio", "GPIO %d configurado correctamente", BUTTON_GPIO);
+    }
+    else {
+        ESP_LOGE("init_gpio", "Error al configurar GPIO: %d", ret);
+    }
 }
 
 /**
@@ -214,8 +220,9 @@ void save_wifi_config_to_nvs(wifi_mode_t mode, const char *ssid, const char *pas
      * Abre el namespace definido por NVS_WIFICONFIG (en este caso "wifi_config") en
      * modo lectura/escritura (NVS_READWRITE).
      */
+    ESP_LOGI("save_wifi_config_to_nvs", "Abriendo espacio de memoria NVS");
     ESP_ERROR_CHECK(nvs_open(NVS_WIFICONFIG, NVS_READWRITE, &nvs_handle));
-
+    ESP_LOGI("save_wifi_config_to_nvs", "Espacio de memoria NVS abierto correctamente");
     /**
      * Se guarda un valor del tipo uint8_t en la clave NVS_KEY_MODE ("mode") dentro del
      * espacio de nombres. el tercer parametro es el modo Wi-Fi actual el cual es manejado
@@ -230,21 +237,30 @@ void save_wifi_config_to_nvs(wifi_mode_t mode, const char *ssid, const char *pas
      * 
      * Sin embargo para este caso unicamente se manejan los valores 1 y 2.
      */
+    ESP_LOGI("save_wifi_config_to_nvs", "Guardando en memoria NVS modo: %d", mode);
     ESP_ERROR_CHECK(nvs_set_u8(nvs_handle, NVS_KEY_MODE, mode));
+    ESP_LOGI("save_wifi_config_to_nvs", "modo %d guardado correctamente", mode);
 
     /**
      * Verifica si el modo es WIFI_MODE_STA y si las cadenas ssid y password no son
      * NULL guarda las cadenas en las claves correspondientes de NVS
      */
     if (mode == WIFI_MODE_STA && ssid && password) {
+        ESP_LOGI("save_wifi_config_to_nvs", "guardando SSID: %s", ssid);
         ESP_ERROR_CHECK(nvs_set_str(nvs_handle, NVS_KEY_SSID, ssid));
+        ESP_LOGI("save_wifi_config_to_nvs", "ssid guardado correctamente");
+        
+        ESP_LOGI("save_wifi_config_to_nvs", "guardando PASSWORD: %s", password);
         ESP_ERROR_CHECK(nvs_set_str(nvs_handle, NVS_KEY_PASSWORD, password));
+        ESP_LOGI("save_wifi_config_to_nvs", "password guardado correctamente");
     }
-
+    
     /**
      * Se confirman los cambios en la memoria flash
      */
+    ESP_LOGI("save_wifi_config_to_nvs", "aplicando cambios en memoria NVS...");
     ESP_ERROR_CHECK(nvs_commit(nvs_handle));
+    ESP_LOGI("save_wifi_config_to_nvs", "cambios aplicados en memoria NVS");
 
     /**
      * Se cierra el espacio de nombres
@@ -260,28 +276,39 @@ void clear_wifi_credentials_from_nvs(void) {
     if (err != ESP_OK) {
         ESP_LOGE("clear_wifi_credentials_from_nvs", "Error abriendo NVS: %s", esp_err_to_name(err));
         return;
+    }else{
+        ESP_LOGI("clear_wifi_credentials_from_nvs", "NVS abierto correctamente");
     }
 
     // Eliminar las claves de configuración Wi-Fi
     err = nvs_erase_key(nvs_handle, NVS_KEY_MODE);
     if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
         ESP_LOGE("clear_wifi_credentials_from_nvs", "Error eliminando clave MODE: %s", esp_err_to_name(err));
+    }else{
+        ESP_LOGI("clear_wifi_credentials_from_nvs", "Clave MODE eliminada correctamente");
     }
 
     err = nvs_erase_key(nvs_handle, NVS_KEY_SSID);
     if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
         ESP_LOGE("clear_wifi_credentials_from_nvs", "Error eliminando clave SSID: %s", esp_err_to_name(err));
+    }else{
+        ESP_LOGI("clear_wifi_credentials_from_nvs", "Clave SSID eliminada correctamente");
     }
 
     err = nvs_erase_key(nvs_handle, NVS_KEY_PASSWORD);
     if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
         ESP_LOGE("clear_wifi_credentials_from_nvs", "Error eliminando clave PASSWORD: %s", esp_err_to_name(err));
+    }else{
+        ESP_LOGI("clear_wifi_credentials_from_nvs", "Clave PASSWORD eliminada correctamente");
     }
+    
 
     // Aplicar cambios
     err = nvs_commit(nvs_handle);
     if (err != ESP_OK) {
         ESP_LOGE("clear_wifi_credentials_from_nvs", "Error confirmando cambios en NVS: %s", esp_err_to_name(err));
+    }else{
+        ESP_LOGI("clear_wifi_credentials_from_nvs", "Cambios confirmados en NVS");
     }
 
     // Cerrar NVS
@@ -322,16 +349,23 @@ wifi_mode_t read_wifi_config_from_nvs(char *ssid, size_t ssid_len, char *passwor
      * Si ocurre un error (por ejemplo, el namespace no existe), la función continúa sin
      * intentar leer.
      */
-    if (nvs_open(NVS_WIFICONFIG, NVS_READONLY, &nvs_handle) == ESP_OK) {
+    esp_err_t err = nvs_open(NVS_WIFICONFIG, NVS_READONLY, &nvs_handle);
+    if (err == ESP_OK) {
         uint8_t stored_mode;
         /**
          * nvs_get_u8 lee un valor tipo uint8_t asociado a la clave NVS_KEY_MODE. Si
          * la lectura es exitosa, el valor leído (stored_mode) se convierte a wifi_mode_t
          * y se almacena en mode.
          */
-        if (nvs_get_u8(nvs_handle, NVS_KEY_MODE, &stored_mode) == ESP_OK) {
+        err = nvs_get_u8(nvs_handle, NVS_KEY_MODE, &stored_mode);
+        if (err == ESP_OK) {
+            ESP_LOGI("read_wifi_config_from_nvs", "clave MODE leida correctamente: %d", (wifi_mode_t)stored_mode);
             mode = (wifi_mode_t)stored_mode;
+        }else
+        {
+            ESP_LOGE("read_wifi_config_from_nvs", "Error leyendo clave MODE: %s", esp_err_to_name(err));
         }
+        
 
         /**
          * Si el modo leido es WIFI_MODE_STA se lee la cadena asociada a NVS_KEY_SSID con
@@ -340,15 +374,31 @@ wifi_mode_t read_wifi_config_from_nvs(char *ssid, size_t ssid_len, char *passwor
          * y el buffer password.
          */
         if (mode == WIFI_MODE_STA) {
-            nvs_get_str(nvs_handle, NVS_KEY_SSID, ssid, &ssid_len);
-            nvs_get_str(nvs_handle, NVS_KEY_PASSWORD, password, &password_len);
+            err = nvs_get_str(nvs_handle, NVS_KEY_SSID, ssid, &ssid_len);
+            
+            if (err == ESP_OK) {
+                ESP_LOGI("read_wifi_config_from_nvs", "Clave SSID leida correctamente: %s", ssid);
+            } else {
+                ESP_LOGE("read_wifi_config_from_nvs", "Error leyendo clave SSID: %s", esp_err_to_name(err));
+            }
+            
+            err = nvs_get_str(nvs_handle, NVS_KEY_PASSWORD, password, &password_len);
+            if (err == ESP_OK) {
+                ESP_LOGI("read_wifi_config_from_nvs", "Clave PASSWORD leida correctamente: %s", password);
+            }else{
+                ESP_LOGE("read_wifi_config_from_nvs", "Error leyendo clave PASSWORD: %s", esp_err_to_name(err));
+            }
         }
 
         /**
          * Finalmente se cierra la memoria no volatil.
          */
         nvs_close(nvs_handle);
+    }else
+    {
+        ESP_LOGE("read_wifi_config_from_nvs", "Error abriendo NVS: %s", esp_err_to_name(err));
     }
+    
 
     /**
      * Se devuelve el modo Wi-Fi que se leyó desde la NVS. Si no se pudo leer nada, devolverá
@@ -646,8 +696,15 @@ void wifi_set_STA(void){
      * Esto evita crear múltiples interfaces, lo que podría generar fugas de memoria.
      */
     if (!sta_netif) {
-        ESP_LOGI("wifi_set_STA", "Creando interfaz STA...");
+        ESP_LOGI("wifi_set_STA", "No se ha creado la interfaz. Creando interfaz STA...");
         sta_netif = esp_netif_create_default_wifi_sta();
+        if(sta_netif){
+            ESP_LOGI("wifi_set_STA", "Interfaz STA creada correctamente.");
+        }else
+        {
+            ESP_LOGW("wifi_set_STA", "Error al crear interfaz STA.");
+        }
+        
     }
 
     // **Si Wi-Fi no está configurado en ningún modo, forzar modo STA**
@@ -665,6 +722,7 @@ void wifi_set_STA(void){
         ESP_LOGW("wifi_set_STA", "Wi-Fi no tiene un modo configurado. Estableciendo modo STA...");
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
         ESP_ERROR_CHECK(esp_wifi_start());
+        ESP_LOGI("wifi_set_STA", "Wi-Fi iniciado en modo STA");
     } else if (mode != WIFI_MODE_STA) {
         /**
          * Si la ESP32 está en modo AP (WIFI_MODE_AP) o AP+STA (WIFI_MODE_APSTA), se cambia
@@ -674,6 +732,7 @@ void wifi_set_STA(void){
          */
         ESP_LOGW("wifi_set_STA", "Cambiando Wi-Fi a modo STA...");
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+        ESP_LOGW("wifi_set_STA", "Wi-Fi establecido en modo STA");
     } else {
         /**
          * Si mode == WIFI_MODE_STA, significa que la ESP32 ya está en modo STA.
@@ -685,16 +744,12 @@ void wifi_set_STA(void){
          */
         ESP_LOGI("wifi_set_STA", "Wi-Fi ya está en modo STA. Iniciando Wi-Fi...");
         ESP_ERROR_CHECK(esp_wifi_start());
+        ESP_LOGI("wifi_set_STA", "Wi-Fi iniciado");
     }
-    /**
-     * Se indica en el monitor serie que la ESP32 ahora está en modo estación.
-     * A partir de aquí, el dispositivo está listo para conectarse a una red Wi-Fi.
-     */
-    ESP_LOGI("wifi_set_STA", "Modo STA activado");
 }
 
 void start_IP_events(void){
-    
+    ESP_LOGI("start_IP_events", "Iniciando eventos IP...");
     ESP_ERROR_CHECK(esp_event_handler_instance_register(
         IP_EVENT,
         IP_EVENT_STA_GOT_IP,
@@ -702,6 +757,7 @@ void start_IP_events(void){
         NULL,
         &instance_got_ip
     ));
+    ESP_LOGI("start_IP_events", "Eventos IP iniciados");
 }
 
 /**
@@ -718,6 +774,7 @@ void start_WIFI_events(void){
      * Esto significa que cada vez que ocurra un evento de Wi-Fi, la función event_handler() 
      * será ejecutada.
      */
+    ESP_LOGI("start_WIFI_events", "Iniciando eventos Wi-Fi...");
     ESP_ERROR_CHECK(esp_event_handler_instance_register(
         WIFI_EVENT,
         ESP_EVENT_ANY_ID,
@@ -725,21 +782,26 @@ void start_WIFI_events(void){
         NULL,
         &instance_any_id
     ));
+    ESP_LOGI("start_WIFI_events", "Eventos Wi-Fi iniciados");
 }
 void stop_IP_events(void){
+    ESP_LOGI("stop_IP_events", "Deteniendo eventos IP...");
     ESP_ERROR_CHECK(esp_event_handler_instance_unregister(
         IP_EVENT, 
         IP_EVENT_STA_GOT_IP, 
         instance_got_ip
     ));
+    ESP_LOGI("stop_IP_events", "Eventos IP detenidos");
 }
 
 void stop_sta_disconnection_event_handler(void){
+    ESP_LOGI("stop_sta_disconnection_event_handler", "Deteniendo handler de desconexión STA...");
     ESP_ERROR_CHECK(esp_event_handler_instance_unregister(
         WIFI_EVENT, 
         WIFI_EVENT_STA_DISCONNECTED, 
         instance_any_id
     ));
+    ESP_LOGI("stop_sta_disconnection_event_handler", "handler de desconexión STA detenido");
 
 }
 
@@ -955,21 +1017,6 @@ void stop_http_server() {
     if (server != NULL) {
         ESP_LOGI("stop_http_server", "Deteniendo servidor HTTP...");
 
-        // **Cerrar manualmente todas las conexiones activas**
-        /*
-        for (int fd = 0; fd < config.max_open_sockets; fd++) {
-            esp_err_t err = httpd_sess_trigger_close(server, fd);
-            if (err == ESP_OK) {
-                ESP_LOGI("HTTP", "Conexión en socket %d cerrada correctamente.", fd);
-            } else if (err == ESP_ERR_NOT_FOUND) {
-                ESP_LOGW("HTTP", "Socket %d no estaba en uso.", fd);
-            } else {
-                ESP_LOGE("HTTP", "Error cerrando socket %d: %s", fd, esp_err_to_name(err));
-            }
-        }*/
-
-
-
         for (int fd = 0; fd < CONFIG_LWIP_MAX_SOCKETS; fd++) {
             esp_err_t err = httpd_sess_trigger_close(server, fd);
             if (err == ESP_OK) {
@@ -1099,7 +1146,7 @@ void start_http_server(void) {
         }
 
         // registrar ruta submit
-        if (httpd_register_uri_handler(server, &submit))
+        if (httpd_register_uri_handler(server, &submit)==ESP_OK)
         {
             ESP_LOGI("start_http_server", "Manejador de ruta submit registrada correctamente");
         }else
@@ -1108,7 +1155,7 @@ void start_http_server(void) {
         }
         
         // Registtrar rutas no definidas
-        if (httpd_register_uri_handler(server, &redirect))
+        if (httpd_register_uri_handler(server, &redirect)==ESP_OK)
         {
             ESP_LOGI("start_http_server", "Manejador de rutas desconocidas registrado correctamente");
         }else
@@ -1117,7 +1164,7 @@ void start_http_server(void) {
         }
 
         // Registrar ruta del archivo script
-        if (httpd_register_uri_handler(server, &script))
+        if (httpd_register_uri_handler(server, &script)==ESP_OK)
         {
             ESP_LOGI("start_http_server", "Manejador de archivo javascript registrado correctamente");
         }else
@@ -1126,7 +1173,7 @@ void start_http_server(void) {
         }
 
         //registrar ruta scann
-        if (httpd_register_uri_handler(server, &scan))
+        if (httpd_register_uri_handler(server, &scan)==ESP_OK)
         {
             ESP_LOGI("start_http_server", "Manejador de ruta scan registrada correctamente");
         }else
@@ -1200,6 +1247,7 @@ void wifi_set_AP_STA(void) {
         if (current_mode == WIFI_MODE_STA) {
             ESP_LOGI("wifi_set_AP_STA", "Wi-Fi estaba en modo STA, deteniéndolo antes de cambiar a AP+STA...");
             ESP_ERROR_CHECK(esp_wifi_stop());
+            ESP_LOGI("wifi_set_AP_STA", "modo STA detenido");
             vTaskDelay(pdMS_TO_TICKS(500));
         }
     } else {
@@ -1210,8 +1258,10 @@ void wifi_set_AP_STA(void) {
      * Con la función esp_wifi_set_mode() se establece que el Wi-Fi cambie a 
      * modo AP+STA usando la macro WIFI_MODE_APSTA
      */
+    ESP_LOGI("wifi_set_AP_STA", "Estableciendo modo AP+STA ...");
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
-
+    ESP_LOGI("wifi_set_AP_STA", "Modo AP+STA establecido");
+    
     /**
      * En el caso de que exista alguna interfaz de red previa (AP o STA), esta 
      * se destruye para prevenir fugas de memoria y conflictos de reconfiguracón.
@@ -1231,6 +1281,21 @@ void wifi_set_AP_STA(void) {
      */
     ap_netif = esp_netif_create_default_wifi_ap();
     sta_netif = esp_netif_create_default_wifi_sta();
+    if (ap_netif && sta_netif)
+    {
+        ESP_LOGI("wifi_set_AP_STA", "Interfaces AP y STA creadas correctamente");
+    }
+    if (!ap_netif)
+    {
+        ESP_LOGE("wifi_set_AP_STA", "Error al crear la interfaz AP");
+    }
+    if (!sta_netif)
+    {
+        ESP_LOGE("wifi_set_AP_STA", "Error al crear la interfaz STA");
+    }
+    
+    
+    
     
     /**
      * Se arma la estructura de configuración del AP. esta estructura contiene
@@ -1266,10 +1331,12 @@ void wifi_set_AP_STA(void) {
      * Se configura la ESP32 como punto de acceso con los parametros 
      * definidos en wifi_conf
      */
+    ESP_LOGI("wifi_set_AP_STA", "estableciendo configuracion de punto de acceso ...");
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
 
     //Se inicia el Wi-Fi con la nueva configuración (modo AP+STA)
     ESP_ERROR_CHECK(esp_wifi_start());
+    ESP_LOGI("wifi_set_AP_STA", "Punto de acceso iniciado correctamente");
 
     //Se imprime el SSID del AP en el monitor serie
     ESP_LOGI("wifi_set_AP_STA", "interfaz de configuración activa con SSID: %s", AP_SSID);
@@ -1307,6 +1374,7 @@ void wifi_system_init(void){
      * @return retorna un codigo de error que indica si la inicialización fue 
      * exitosa o falló
      */
+    ESP_LOGI("wifi_system_init", "Iniciando memoria NVS...");
     esp_err_t ret = nvs_flash_init();
     /**
      * Si la inicialización de NVS falla por uno de estos dos motivos:
@@ -1319,20 +1387,30 @@ void wifi_system_init(void){
      */
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         // Borra toda la memoria NVS
+        ESP_LOGI("wifi_system_init", "error, borrando la memoria NVS...");
         ESP_ERROR_CHECK(nvs_flash_erase());
+        ESP_LOGI("wifi_system_init", "Memoria NVS borrada");
         // vuelve a inicializar NVS desde cero
+        ESP_LOGI("wifi_system_init", "Volviendo a iniciar memoria NVS...");
         ESP_ERROR_CHECK(nvs_flash_init());
+        ESP_LOGI("wifi_system_init", "Memoria NVS iniciada correctamente");
+    }else{
+        ESP_LOGI("wifi_system_init", "Memoria NVS iniciada correctamente");
     }
     /**
      * Inicializa el sistema de redes en la ESP32. Esto es necesario antes de
      * configurar cualquier interfaz Wi-Fi o Ethernet
      */
+    ESP_LOGI("wifi_system_init", "Iniciando sistema de redes NETIF...");
     ESP_ERROR_CHECK(esp_netif_init());
+    ESP_LOGI("wifi_system_init", "sistema de redes NETIF iniciado");
     /**
      * Crea el bucle de eventos principal de la ESP32, que se encargará de manejar
      * eventos de Wi-Fi, red y otros perifericos
      */
+    ESP_LOGI("wifi_system_init", "Creando bucle de eventos principal...");
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+    ESP_LOGI("wifi_system_init", "bucle de eventos principal creado correctamente");
 
     /**
      * - wifi_init_config_t es una estructura que contiene parámetros de 
@@ -1344,7 +1422,9 @@ void wifi_system_init(void){
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
 
     //inicializa el controlador Wi-Fi con la configuración establecida.
+    ESP_LOGI("wifi_system_init", "Iniciando controlador Wi-Fi");
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    ESP_LOGI("wifi_system_init", "Controlador Wi-Fi Iniciado correctamente");
 
 }
 
@@ -1412,14 +1492,6 @@ void reset_handler(void *param) {
 
                     //Se imprime el mensaje "borrando toda la memoria NVS" en el monitor serie
                     ESP_LOGI("reset_handler", "Borrando toda la memoria NVS...");
-
-                    /*
-                    // se borra la memoria NVS
-                    ESP_ERROR_CHECK(nvs_flash_erase());
-
-                    // Se vuelve a inicializar la memoria NVS
-                    ESP_ERROR_CHECK(nvs_flash_init());*/
-
                     clear_wifi_credentials_from_nvs();
                     ESP_LOGI("reset_handler", "Las credenciales Wi-Fi han sido eliminadas");
 
@@ -1990,7 +2062,7 @@ esp_err_t set_timer_adc(void)
      * @return retorna el handler del timer que se acaba de crear
      * 
      */
-    ESP_LOGI("MAIN", "Configurando prioridad del Timer Service Task...");
+    ESP_LOGI("set_timer_adc", "Configurando prioridad del Timer Service Task...");
     vTaskPrioritySet(xTimerGetTimerDaemonTaskHandle(), 2);
     xTimerADC = xTimerCreate(
         "Timer",
