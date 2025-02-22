@@ -8,6 +8,7 @@
         "vector": "cpp",
         "limits": "cpp",
         "sstream": "cpp",
-        "system_error": "cpp"
+        "system_error": "cpp",
+        "sockets.h": "c"
     }
 }

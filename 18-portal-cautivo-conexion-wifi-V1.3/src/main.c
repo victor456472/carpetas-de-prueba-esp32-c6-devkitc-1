@@ -1,6 +1,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/timers.h"
+#include "freertos/queue.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_netif.h"
@@ -14,6 +15,8 @@
 #include "esp_timer.h"  // Librería para medir tiempo en microsegundos
 #include "esp_adc/adc_oneshot.h"
 #include "esp_wifi_types.h"
+#include "lwip/sockets.h"
+
 
 #define AP_SSID "RED ESP32 VICTOR"
 #define AP_PASSWORD "12345678"
@@ -38,17 +41,14 @@
 #define HOLD_TIME_MS 10000   // Tiempo en milisegundos para considerar que el botón está presionado (10 segundos)
 
 //parametros del ADC
-#define SAMPLE_PERIOD_MS 100
+#define SAMPLE_PERIOD_MS 500
 #define ADC_UNIT ADC_UNIT_1
 #define ADC_CHANNEL ADC_CHANNEL_5
 #define ADC_ATTENUATION ADC_ATTEN_DB_6
 #define ADC_BITWIDTH ADC_BITWIDTH_12
 
-//TAG del Wi-Fi
-static const char *TAG = "WIFI_AP";
+QueueHandle_t stop_server_queue;
 
-//TAG del ADC
-static const char *TAG_ADC = "ADC";
 static led_strip_t *led_strip=NULL;
 
 // handler del timer
@@ -67,6 +67,96 @@ esp_event_handler_instance_t instance_got_ip;
 //estado de creación de interfaces STA y AP
 static esp_netif_t *sta_netif = NULL;
 static esp_netif_t *ap_netif = NULL;
+
+/**
+ * @brief la siguiente estrucutra permite configurar el servidor HTTP con 
+ * valores por defecto usando la macro HTTPD_DEFAULT_CONFIG().
+ * 
+ * algunos parametros predeterminados incluyen:
+ * @param[in] Puerto 80 (HTTP estándar)
+ * @param[in] max_open_sockets Número maximo de conexiones simultaneas
+ * @param[in] stack_size tamaño del buffer para solicitudes
+ */
+httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+/**
+ * @brief esta otra estructura declara un manejador para el servidor 
+ * HTTP, que se usará para registrar rutas y controladores.
+ */
+httpd_handle_t server = NULL;
+
+esp_err_t root_handler(httpd_req_t *req);
+esp_err_t submit_handler(httpd_req_t *req);
+esp_err_t not_found_handler(httpd_req_t *req);
+esp_err_t script_handler(httpd_req_t *req);
+esp_err_t scan_handler(httpd_req_t *req);
+
+
+/**
+ * @brief Configura un manejador para a ruta raiz que se activa
+ * cuando un cliente envía una solicitud GET a la URL (/).
+ * 
+ * los campos que maneja la estructura son:
+ * 
+ * @param[in] uri especifica la ruta raiz del servidor. para este caso es "/"
+ * @param[in] method tipo de solicitud a la cual responde el manejador. en este caso es GET.
+ * @param[in] handler asocia el manejador de solicitudes que para este caso es la funcion roor_handler()
+ * @param[in] user_ctx es un campo opcional para pasar datos personalizados al manejador. en este caso no se usa.
+ */
+httpd_uri_t root = {
+    .uri = "/",
+    .method = HTTP_GET,
+    .handler = root_handler,
+    .user_ctx = NULL
+};
+
+/**
+ * Configura y registra un manejador para la ruta /submit la cual
+ * se usa cuando el cliente presiona el boton "Enviar" en una pagina
+ * web alojada en la ESP32. En este caso se procesa la solicitud con
+ * submit_handle()
+ */
+httpd_uri_t submit = {
+    .uri = "/submit",
+    .method = HTTP_GET,
+    .handler = submit_handler,
+    .user_ctx = NULL
+};
+
+/**
+ * Configura y registra un manejador genérico para todas las rutas
+ * no definidas explicitamente.
+ */
+httpd_uri_t redirect = {
+    .uri = "/*",
+    .method = HTTP_GET,
+    .handler = not_found_handler,
+    .user_ctx = NULL
+};
+
+/**
+ * Este registro permite servir un archivo script.js almacenado en 
+ * SPIFFS si la página HTML de la ESP32 incluye:
+ * 
+ * <script src="/script.js"></script>
+ */
+httpd_uri_t script = {
+    .uri = "/script.js",
+    .method = HTTP_GET,
+    .handler = script_handler,
+    .user_ctx = NULL
+};
+
+/**
+ * Esta ruta permite realizar un escaneo de redes wi-fi disponibles,
+ * cuando el cliente accede a /scan, el manejador scan_handler() devuelve un JSON
+ * con la lista de redes.
+ */
+httpd_uri_t scan = {
+    .uri = "/scan",
+    .method = HTTP_GET,
+    .handler = scan_handler,
+    .user_ctx = NULL
+};
 
 esp_err_t set_timer_adc(void);
 esp_err_t start_timer_adc(void);
@@ -113,6 +203,7 @@ void init_gpio() {
  */
 void save_wifi_config_to_nvs(wifi_mode_t mode, const char *ssid, const char *password) {
     
+    ESP_LOGI("save_wifi_config_to_nvs", "guardando credenciales...");
     /**
      * Lo siguiente es un identificador que se utiliza para interactuar con la memoria
      * no volatil.
@@ -160,6 +251,45 @@ void save_wifi_config_to_nvs(wifi_mode_t mode, const char *ssid, const char *pas
      */
     nvs_close(nvs_handle);
 }
+
+void clear_wifi_credentials_from_nvs(void) {
+    nvs_handle_t nvs_handle;
+
+    // Abrir el namespace en modo lectura/escritura
+    esp_err_t err = nvs_open(NVS_WIFICONFIG, NVS_READWRITE, &nvs_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE("clear_wifi_credentials_from_nvs", "Error abriendo NVS: %s", esp_err_to_name(err));
+        return;
+    }
+
+    // Eliminar las claves de configuración Wi-Fi
+    err = nvs_erase_key(nvs_handle, NVS_KEY_MODE);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGE("clear_wifi_credentials_from_nvs", "Error eliminando clave MODE: %s", esp_err_to_name(err));
+    }
+
+    err = nvs_erase_key(nvs_handle, NVS_KEY_SSID);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGE("clear_wifi_credentials_from_nvs", "Error eliminando clave SSID: %s", esp_err_to_name(err));
+    }
+
+    err = nvs_erase_key(nvs_handle, NVS_KEY_PASSWORD);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGE("clear_wifi_credentials_from_nvs", "Error eliminando clave PASSWORD: %s", esp_err_to_name(err));
+    }
+
+    // Aplicar cambios
+    err = nvs_commit(nvs_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE("clear_wifi_credentials_from_nvs", "Error confirmando cambios en NVS: %s", esp_err_to_name(err));
+    }
+
+    // Cerrar NVS
+    nvs_close(nvs_handle);
+
+    ESP_LOGI("clear_wifi_credentials_from_nvs", "Credenciales Wi-Fi eliminadas correctamente");
+}
+
 
 /**
  * @brief La siguiente función permite leer de la memoria no volatil (NVS) el modo
@@ -267,7 +397,7 @@ void init_led_strip(void){
      */
     if (!led_strip)
     {
-        ESP_LOGE(TAG, "Fallo al inicializar el LED RGB");
+        ESP_LOGE("init_led_strip", "Fallo al inicializar el LED RGB");
         return;
     }
 
@@ -385,164 +515,10 @@ void init_spiffs(void) {
      * correctamente".
      */
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Error al inicializar SPIFFS (%s)", esp_err_to_name(ret));
+        ESP_LOGE("init_spiffs", "Error al inicializar SPIFFS (%s)", esp_err_to_name(ret));
     } else {
-        ESP_LOGI(TAG, "SPIFFS inicializado correctamente");
+        ESP_LOGI("init_spiffs", "SPIFFS inicializado correctamente");
     }
-}
-
-/* 
-la siguiente funcion es un manejador para solucitudes HTTP que se 
-utiliza para servir la pagina principal del servidor web.
-
-tiene como parametro el argumento httpd_req_t *req el cual es un
-puntero a la estructura de la solicitud HTTP que contiene informacion
-sobre la solicitud entrante como la ruta solicitada, los encabezados
-y más.
-*/ 
-esp_err_t root_handler(httpd_req_t *req) {
-    /**
-     * la funcion fopen() abre el archivo especificado en
-     * modo lectura ("r"). el archivo debe estar en la particion
-     * SPIFFS y disponible en la ruta /spiffs/index.html
-     * 
-     * file es un puntero al archivo que será leido. si el 
-     * archivo no se encuentra o no se puede abrir, fopen
-     * devuelve NULL.
-     * 
-     * la funcion fopen() tiene dos parametros:
-     * 
-     * @param[in] filename Ruta del archivo que se desea abrir
-     * @param[in] mode modo de apertura. este puede tener varios tipos:
-     *                 "r" - leer (error si el arhivo no existe)
-     *                 "w" - Escribir (crea el archivo si no existe o lo sobrescribe si ya existe)
-     *                 "a" - Añadir (escribe al final del archivo)
-     *                 "r+" - Leer y escribir
-     *                 "w+" - Leer y escribir (sobrescribe el archivo existente)
-     *                 "a+" - Leer y escribir (añade al final del archivo)
-     * 
-     * @note
-     * 
-     * El tipo de dato FILE en C representa una estructura
-     * definida en la biblioteca estándar <stdio.h> que se 
-     * utiliza para manejar operaciones de archivos. es una
-     * abstraccion que contiene toda la informacion necesaria
-     * para interactuar con un archivoen el sistema de
-     * archivos.
-     * 
-     * Es importante aclarar que FILE no es un tipo de datos
-     * primitivo como "int" o "char". Es una estructura
-     * definida internamente en la biblioteca estandar de C.
-     * 
-     * la definición de FILE puede variar dependiendo del
-     * sistema operativo y la implementación de la biblioteca
-     * C, pero tipicamente contiene:
-     * 
-     * 1) puntero al archivo en el sistema de archivos
-     * 
-     * 2) buffer interno para manejar datos durante la lectura
-     * y escritura
-     * 
-     * 3) indicador de fin de archivo (EOF)
-     * 
-     * 4) errores relacionados con la operacion de archivo
-     * 
-     * FILE se utiliza con las funciones de manejo de archivos
-     * como fopen, fclose, fread, fwrite, etc...
-     */
-    FILE *file = fopen("/spiffs/index.html", "r");
-
-    /**
-     * Si el puntero file tiene un valor de NULL significa
-     * que la funcion fopen no pudo abrir el archivo por lo
-     * cual se evalua la condicion !file ya que si file es 
-     * NULL, !file es True y por ende el programa entra a la 
-     * condición para imprimir en el monitor serie el mensaje
-     * "no se pudo abrir el archivo HTML" ademas de enviar un
-     * error 404 al servidor y retornar ESP_FAIL.
-     */
-    if (!file) {
-        ESP_LOGE(TAG, "No se pudo abrir el archivo HTML");
-        httpd_resp_send_404(req);
-        return ESP_FAIL;
-    }
-
-    /**
-     * La siguiente función establece el encabezado HTTP 
-     * Content-Type de la respuesta como text/html. esto
-     * indica al navegador del cliente que el contenido
-     * que se esta enviando es una pagina HTML.
-     */
-    httpd_resp_set_type(req, "text/html");
-
-    /**
-     * Se declara un buffer temporal de 1024 bytes para
-     * almacenar partes del archivo mientras se lee
-     */
-    char buffer[1024];
-
-    /**
-     * size_t es un tipo de dato sin signo que se utiliza
-     * comúnmente para representar tamaños o conteos en C.
-     * Es el tipo de retorno de funciones como fread, por 
-     * lo cual es el tipo de dato adecuado para almacenar
-     * el tamaño del archivo.
-     */
-    size_t read_bytes;
-
-    /**
-     * El siguiente ciclo permite enviar el contenido html
-     * al servidor por chunks o "paquetes". para ello primero
-     * se usa la funcion fread() la cual lee datos desde el
-     * archivo (file) en bloques del tamaño especificado 
-     * (1024 bytes) y los guarda en el búfer (buffer).
-     * 
-     * la funcion fread tiene los siguientes parametros:
-     * @param[out] buffer Direccion del buffer donde se 
-     * almacenan los datos leidos
-     * @param[in] 1 tamaño de cada elemento que se lee 
-     * (1 byte en este caso)
-     * @param[in] sizeofBuffer maximo número de elementos 
-     * a leer (hasta 1024 bytes en este caso)
-     * 
-     * Al ser invocada con los limites establecidos, la 
-     * función devuelve la cantidad real de bytes leidos
-     * desde el archivo en cada iteración y guarda el conteo 
-     * dentro de read_bytes. si fread encuentra menos bytes 
-     * (por ejemplo al final del archivo), el valor será
-     * menor que el tamaño del buffer.
-     * 
-     * Si ocurre un error o se alcanza el final del archiv
-     * fread() devuelve 0.
-     * 
-     * con esto en mente se puede evaluar si read_bytes es
-     * mayor a 0. en tal caso se debe enviar el paquete de 
-     * datos al cliente. en caso que readbytes sea 0
-     * significa que se llegó al final del archivo y se 
-     * debe finalizar el ciclo.
-     */
-    while ((read_bytes = fread(buffer, 1, sizeof(buffer), file)) > 0) {
-        /**
-         * con la funcion httpd_resp_send_chunk() se envia
-         * el contenido leido en el fuffer como un fragmento
-         * (chunk) al cliente. el tamaño del fragmento es 
-         * igual a read_bytes.
-         */
-        httpd_resp_send_chunk(req, buffer, read_bytes);
-    }
-    /**
-     * A continuacion se envia un fragmento vacio (NULL) de tamaño
-     * 0 al cliente. esto indica que ya no se enviarán más datos. 
-     * esta acción es obligatoria para finalizar una respuesta
-     * con "chunked encoding"
-     */
-    httpd_resp_send_chunk(req, NULL, 0); 
-    /**
-     * Finalmente se cierra el archivo abierto por fopen()
-     * para liberar recursos del sistema.
-     */
-    fclose(file);
-    return ESP_OK;
 }
 
 /**
@@ -573,7 +549,7 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
          * Registra una advertencia en el LOG con un mensaje que indica "Conexión 
          * conexion fallida, intentando reconectar..."
          */
-        ESP_LOGI(TAG, "Conexión fallida, intentando reconectar...");
+        ESP_LOGI("event_handler", "Conexión fallida, intentando reconectar...");
         wifi_connected = false;
 
         /**
@@ -618,18 +594,15 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
          * event->ip_info.ip es la direccion IP obtenida en formato binario
          * 
          */
-        ESP_LOGI(TAG, "Conexión exitosa, dirección IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        ESP_LOGI("event_handler", "Conexión exitosa, dirección IP: " IPSTR, IP2STR(&event->ip_info.ip));
         
         /**
          * Se establece el led RGB de color verde para indicar que la conexion fue exitosa
          */
         set_led_color(COLOR_LIGHT_GREEN);
         wifi_connected = true;
-        //se habilita el ahorro de bateria
-        ESP_LOGI(TAG, "Habilitando ahorro de energía Wi-Fi...");
-        ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MIN_MODEM));
-        //enciende la lectura del ADC
-        ESP_ERROR_CHECK(start_timer_adc());
+        
+        
     }
 }
 
@@ -647,7 +620,7 @@ void wifi_set_STA(void){
      * Imprime en el monitor serie un mensaje informativo indicando que el proceso de 
      * configuración del modo estación está iniciando.
      */
-    ESP_LOGI(TAG, "Configurando Wi-Fi en modo STA...");
+    ESP_LOGI("wifi_set_STA", "Configurando Wi-Fi en modo STA...");
 
     /**
      * Se declara la variable mode e inicialmente se establece en WIFI_MODE_NULL 
@@ -663,7 +636,7 @@ void wifi_set_STA(void){
      * sido iniciado.
      */
     if (esp_wifi_get_mode(&mode) != ESP_OK) {
-        ESP_LOGW(TAG, "No se pudo obtener el modo Wi-Fi. Asegurar que Wi-Fi está iniciado.");
+        ESP_LOGW("wifi_set_STA", "No se pudo obtener el modo Wi-Fi. Asegurar que Wi-Fi está iniciado.");
     }
 
     /**
@@ -673,7 +646,7 @@ void wifi_set_STA(void){
      * Esto evita crear múltiples interfaces, lo que podría generar fugas de memoria.
      */
     if (!sta_netif) {
-        ESP_LOGI(TAG, "Creando interfaz STA...");
+        ESP_LOGI("wifi_set_STA", "Creando interfaz STA...");
         sta_netif = esp_netif_create_default_wifi_sta();
     }
 
@@ -689,7 +662,7 @@ void wifi_set_STA(void){
          * cualquier intento de conexión fallará. con esta solución se asegura que la ESP32 
          * esté lista para conectarse a una red.
          */
-        ESP_LOGW(TAG, "Wi-Fi no tiene un modo configurado. Estableciendo modo STA...");
+        ESP_LOGW("wifi_set_STA", "Wi-Fi no tiene un modo configurado. Estableciendo modo STA...");
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
         ESP_ERROR_CHECK(esp_wifi_start());
     } else if (mode != WIFI_MODE_STA) {
@@ -699,7 +672,7 @@ void wifi_set_STA(void){
          * esp_wifi_start(). Esto evita problemas de conectividad en caso de que la ESP32 
          * haya sido configurada en otro modo previamente.
          */
-        ESP_LOGW(TAG, "Cambiando Wi-Fi a modo STA...");
+        ESP_LOGW("wifi_set_STA", "Cambiando Wi-Fi a modo STA...");
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     } else {
         /**
@@ -710,14 +683,14 @@ void wifi_set_STA(void){
          * De esta manera se evita reiniciar innecesariamente la configuración si la 
          * ESP32 ya está en el modo correcto.
          */
-        ESP_LOGI(TAG, "Wi-Fi ya está en modo STA. Iniciando Wi-Fi...");
+        ESP_LOGI("wifi_set_STA", "Wi-Fi ya está en modo STA. Iniciando Wi-Fi...");
         ESP_ERROR_CHECK(esp_wifi_start());
     }
     /**
      * Se indica en el monitor serie que la ESP32 ahora está en modo estación.
      * A partir de aquí, el dispositivo está listo para conectarse a una red Wi-Fi.
      */
-    ESP_LOGI(TAG, "Modo STA activado");
+    ESP_LOGI("wifi_set_STA", "Modo STA activado");
 }
 
 void start_IP_events(void){
@@ -790,7 +763,7 @@ esp_err_t wifi_connect_STA(const char *ssid, const char *password) {
      * Imprime en la terminal el nombre de la red a la que se intentará conectar.
      * Esto facilita la depuración y el seguimiento del estado de conexión.
      */
-    ESP_LOGI(TAG, "Conectando a la red Wi-Fi: %s...", ssid);
+    ESP_LOGI("wifi_connect_STA", "Conectando a la red Wi-Fi: %s...", ssid);
     
     /**
      * Llama a start_IP_events(), que registra eventos relacionados 
@@ -807,7 +780,7 @@ esp_err_t wifi_connect_STA(const char *ssid, const char *password) {
     wifi_mode_t mode;
     esp_wifi_get_mode(&mode);
     if (mode != WIFI_MODE_STA && mode != WIFI_MODE_APSTA) {
-        ESP_LOGE(TAG, "Error: Wi-Fi no está en modo STA o AP+STA. No se puede conectar.");
+        ESP_LOGE("wifi_connect_STA", "Error: Wi-Fi no está en modo STA o AP+STA. No se puede conectar.");
         return ESP_FAIL;
     }
 
@@ -839,7 +812,7 @@ esp_err_t wifi_connect_STA(const char *ssid, const char *password) {
     /**
      * Se muestra un mensaje en la terminal indicando que la ESP32 está intentando conectar.
      */
-    ESP_LOGI(TAG, "Esperando conexión...");
+    ESP_LOGI("wifi_connect_STA", "Esperando conexión...");
     
     /**
      * El LED se pone en amarillo (COLOR_YELLOW) para indicar el estado de conexión 
@@ -879,10 +852,10 @@ esp_err_t wifi_connect_STA(const char *ssid, const char *password) {
      */
     if (wifi_connected) {
         start_WIFI_events();
-        ESP_LOGI(TAG, "Conexión exitosa a: %s", ssid);
+        ESP_LOGI("wifi_connect_STA", "Conexión exitosa a: %s", ssid);
         return ESP_OK;
     } else {
-        ESP_LOGW(TAG, "No se pudo conectar a: %s, con la contraseña: %s", ssid, password);
+        ESP_LOGW("wifi_connect_STA", "No se pudo conectar a: %s, con la contraseña: %s", ssid, password);
         return ESP_FAIL;
     }
 }
@@ -978,232 +951,118 @@ void url_decode(char *src, char *dest, size_t dest_size) {
     *d = '\0'; // Termina la cadena con el caracter nulo
 }
 
-esp_err_t script_handler(httpd_req_t *req) {
-    FILE *file = fopen("/spiffs/script.js", "r");
+void stop_http_server() {
+    if (server != NULL) {
+        ESP_LOGI("stop_http_server", "Deteniendo servidor HTTP...");
 
-    if (!file) {
-        ESP_LOGE(TAG, "No se pudo abrir el archivo script.js");
-        httpd_resp_send_404(req);
-        return ESP_FAIL;
-    }
-
-    httpd_resp_set_type(req, "application/javascript");
-
-    char buffer[1024];
-    size_t read_bytes;
-
-    while ((read_bytes = fread(buffer, 1, sizeof(buffer), file)) > 0) {
-        httpd_resp_send_chunk(req, buffer, read_bytes);
-    }
-
-    httpd_resp_send_chunk(req, NULL, 0);
-    fclose(file);
-    return ESP_OK;
-}
-
-esp_err_t scan_handler(httpd_req_t *req) {
-
-    ESP_LOGI("WIFI_SCAN", "Ejecutando escaneo de redes...");
-
-    wifi_scan_config_t scan_config = {
-        .ssid = NULL,
-        .bssid = NULL,
-        .channel = 0,
-        .show_hidden = true
-    };
-
-    ESP_LOGI("WIFI_SCAN", "Iniciando escaneo de redes...");
-    ESP_ERROR_CHECK(esp_wifi_scan_start(&scan_config, true)); // Realizar escaneo sincrónico
-
-    uint16_t ap_count = 0;
-    esp_wifi_scan_get_ap_num(&ap_count);
-    ESP_LOGI("WIFI_SCAN", "Número de redes encontradas: %d", ap_count);
-
-    if (ap_count == 0) {
-        ESP_LOGW("WIFI_SCAN", "No se encontraron redes Wi-Fi.");
-        httpd_resp_set_type(req, "application/json");
-        httpd_resp_send(req, "[]", strlen("[]")); // Enviar lista vacía al cliente
-        return ESP_OK;
-    }
-
-    // **⚠ Reservar memoria dinámicamente para evitar stack overflow ⚠**
-    wifi_ap_record_t *ap_records = (wifi_ap_record_t *)malloc(ap_count * sizeof(wifi_ap_record_t));
-    if (!ap_records) {
-        ESP_LOGE("WIFI_SCAN", "Error: No se pudo asignar memoria para los registros de redes.");
-        httpd_resp_send_500(req); // Responder con error 500
-        return ESP_FAIL;
-    }
-
-    ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&ap_count, ap_records));
-
-    char json_response[1024] = "[";
-    for (int i = 0; i < ap_count; i++) {
-        ESP_LOGI("WIFI_SCAN", "SSID detectado: %s", ap_records[i].ssid);
-        char ssid_entry[128];
-        snprintf(ssid_entry, sizeof(ssid_entry), "\"%s\"%s", ap_records[i].ssid, (i < ap_count - 1) ? "," : "");
-        strcat(json_response, ssid_entry);
-    }
-    strcat(json_response, "]");
-
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json_response, strlen(json_response));
-
-    // Liberar memoria despues de usarla|
-    free(ap_records); 
-
-    return ESP_OK;
-}
-
-
-/**
- * @brief Este es un manejador HTTP que procesa una solicitud enviada desde un formulario
- * web al servidor alojado en la ESP32. Su proposito principale es extraer las credenciales
- * Wi-Fi (SSID y contraseña) del formulario, decodificarlas, almacenarlas en la memoria no
- * volatil (NVS) y cambiar la ESP32 al modo estación (STA) para conectarse a una red Wi-Fi
- * 
- * @param[in] req puntero a la estructura httpd_req_t que representa la solicitud HTTP
- * recibida. Esta estructura contiene informacion relevante como los parametros enviados
- * desde el formulario web.
- * 
- * @return Devuelve un codigo de error o éxito. ESP_OK indica que la función se ejecutó
- * correctamente.
- */
-esp_err_t submit_handler(httpd_req_t *req) {
-    // se declara un buffer de 100 bytes para extraer la cadena de consulta de la URL
-    char param[100];
-    /**
-     * La función httpd_req_get_url_query_str() permite recibir el query como una cadena
-     * de caracteres. tiene como parametros:
-     * 
-     * 1- estructura de la solicitud http recibida.
-     * 2- buffer donde se almacenará la cadena de caracteres, en este caso es la variable
-     * param.
-     * 3- tamaño del buffer donde se almacenará ña cadena de caracteres.
-     * 
-     * Si la función se ejecuta correctamente devuelve ESP_OK lo que significa que hay datos
-     * que procesar. por el contrario se debe devolver un mensaje de error al cliente.
-     */
-    if (httpd_req_get_url_query_str(req, param, sizeof(param)) == ESP_OK) {
-        /**
-         * Los buffers ssid_encoded y password_encoded sirven para almacenar el SSID y la
-         * contraseña tal como se reciben en formato codificado (URL encoding)
-         */
-        char ssid_encoded[50];
-        char password_encoded[50];
-        /**
-         * Los buffers ssid y password se usan para almacenar los valores decodificados
-         * despues de eliminar el URL encoding
-         */
-        char ssid[50];
-        char password[50];
-
-        /**
-         * Se buscan los parametros especificos en la cadena param y se almacenan sus 
-         * valores en los buffers ssid_encoded y password_encoded. la condicion indica que
-         * deben recibirse ambos parametros para entrar en "verdadero".
-         * 
-         * Es importante aclarar que la función httpd_query_key_value permite buscar 
-         * en la cadena de consulta el parametro especificado y almacenarlo en un buffer 
-         * para su posterior uso. Si la operación es correcta devuelve ESP_OK.
-         */
-
-        if (httpd_query_key_value(param, "SSID", ssid_encoded, sizeof(ssid_encoded)) == ESP_OK &&
-            httpd_query_key_value(param, "PASSWORD", password_encoded, sizeof(password_encoded)) == ESP_OK) {
-
-            // Decodificar SSID y contraseña
-            url_decode(ssid_encoded, ssid, sizeof(ssid));
-            url_decode(password_encoded, password, sizeof(password));
-
-            // Se imprimen las credenciales decodificadas en el monitor serial
-            ESP_LOGI(TAG, "SSID Decodificado: %s", ssid);
-            ESP_LOGI(TAG, "PASSWORD Decodificado: %s", password);
-
-            // **Enviar respuesta indicando que se intentará conectar**
-            httpd_resp_set_type(req, "text/plain");
-            httpd_resp_send(req, "Intentando conectar a la red Wi-Fi...", strlen("Intentando conectar a la red Wi-Fi..."));
-
-            // **Ahora iniciamos la conexión después de enviar la respuesta**
-            vTaskDelay(pdMS_TO_TICKS(1000));  // Pequeña espera para evitar interferencias
-            esp_err_t connection_state = wifi_connect_STA(ssid, password);
-            if (connection_state == ESP_OK) {
-                ESP_LOGI(TAG, "Conexión establecida correctamente.");
-                wifi_set_STA();
-                save_wifi_config_to_nvs(WIFI_MODE_STA, ssid, password);
-            } 
-            else {
-                ESP_LOGE(TAG, "Error desconocido al conectarse. verifique que las credenciales sean correctas y que la red este activa");
-                for (size_t i = 0; i < 3; i++)
-                {
-                    set_led_color(COLOR_MAGENTA);
-                    vTaskDelay(pdMS_TO_TICKS(500));
-                    set_led_color(TURN_OFF);
-                    vTaskDelay(pdMS_TO_TICKS(500));
-                }
-                set_led_color(COLOR_CYAN);
-                const char redirect_html[] = "<html><head>"
-                             "<meta http-equiv='refresh' content='0; url=/' />"
-                             "<script>window.location.href='/';</script>"
-                             "</head></html>";
-                httpd_resp_set_type(req, "text/html");
-                httpd_resp_send(req, redirect_html, strlen(redirect_html));
-
+        // **Cerrar manualmente todas las conexiones activas**
+        /*
+        for (int fd = 0; fd < config.max_open_sockets; fd++) {
+            esp_err_t err = httpd_sess_trigger_close(server, fd);
+            if (err == ESP_OK) {
+                ESP_LOGI("HTTP", "Conexión en socket %d cerrada correctamente.", fd);
+            } else if (err == ESP_ERR_NOT_FOUND) {
+                ESP_LOGW("HTTP", "Socket %d no estaba en uso.", fd);
+            } else {
+                ESP_LOGE("HTTP", "Error cerrando socket %d: %s", fd, esp_err_to_name(err));
             }
+        }*/
 
-            return ESP_OK;
-        } else {
-            httpd_resp_sendstr(req, "Error al procesar los datos del formulario.");
+
+
+        for (int fd = 0; fd < CONFIG_LWIP_MAX_SOCKETS; fd++) {
+            esp_err_t err = httpd_sess_trigger_close(server, fd);
+            if (err == ESP_OK) {
+                ESP_LOGI("stop_http_server", "Conexión en socket %d cerrada correctamente.", fd);
+            } else if (err == ESP_ERR_NOT_FOUND) {
+                ESP_LOGW("stop_http_server", "Socket %d no estaba en uso.", fd);
+            } else {
+                ESP_LOGE("stop_http_server", "Error cerrando socket %d: %s", fd, esp_err_to_name(err));
+            }
         }
+
+        wifi_sta_list_t sta_list;
+        esp_wifi_ap_get_sta_list(&sta_list);
+
+        if (sta_list.num > 0) {
+            ESP_LOGW("stop_http_server", "Hay %d clientes conectados. Desconectándolos antes de apagar el AP...", sta_list.num);
+
+            for (int i = 0; i < sta_list.num; i++) {
+                esp_err_t err = esp_wifi_deauth_sta(i + 1); // AID comienza desde 1
+                if (err == ESP_OK) {
+                    ESP_LOGI("stop_http_server", "Cliente %d (%02X:%02X:%02X:%02X:%02X:%02X) desconectado.",
+                            i,
+                            sta_list.sta[i].mac[0], sta_list.sta[i].mac[1], sta_list.sta[i].mac[2],
+                            sta_list.sta[i].mac[3], sta_list.sta[i].mac[4], sta_list.sta[i].mac[5]);
+                } else {
+                    ESP_LOGE("stop_http_server", "Error desconectando al cliente %d (%02X:%02X:%02X:%02X:%02X:%02X): %s",
+                            i,
+                            sta_list.sta[i].mac[0], sta_list.sta[i].mac[1], sta_list.sta[i].mac[2],
+                            sta_list.sta[i].mac[3], sta_list.sta[i].mac[4], sta_list.sta[i].mac[5],
+                            esp_err_to_name(err));
+                }
+            }
+        } else {
+            ESP_LOGI("stop_http_server", "No hay clientes conectados.");
+        }
+
+        // **Intentar detener el servidor HTTP**
+        if(httpd_unregister_uri_handler(server, "/", HTTP_GET)==ESP_OK){
+            ESP_LOGI("stop_http_server","ruta / borrada correctamente");
+        }else{
+            ESP_LOGE("stop_http_server","ruta / no se pudo borrar correctamente");
+        }
+
+        if(httpd_unregister_uri_handler(server, "/submit", HTTP_GET)==ESP_OK){
+            ESP_LOGI("stop_http_server","ruta /submit borrada correctamente");
+        }else{
+            ESP_LOGE("stop_http_server","ruta /submit no se pudo borrar correctamente");
+        }
+
+        if(httpd_unregister_uri_handler(server, "/*", HTTP_GET)==ESP_OK){
+            ESP_LOGI("stop_http_server","ruta /* borrada correctamente");
+        }else{
+            ESP_LOGE("stop_http_server","ruta /* no se pudo borrar correctamente");
+        }
+
+        if(httpd_unregister_uri_handler(server, "/script.js", HTTP_GET)==ESP_OK){
+            ESP_LOGI("stop_http_server","ruta /script.js borrada correctamente");
+        }else{
+            ESP_LOGE("stop_http_server","ruta /script.js no se pudo borrar correctamente");
+        }
+
+        if(httpd_unregister_uri_handler(server, "/scan", HTTP_GET)==ESP_OK){
+            ESP_LOGI("stop_http_server","ruta /scan borrada correctamente");
+        }else{
+            ESP_LOGE("stop_http_server","ruta /scan no se pudo borrar correctamente");
+        }
+
+        esp_err_t err = httpd_stop(server);
+        
+        ESP_LOGI("stop_http_server","ha pasado la funcion httpd_stop");
+
+        if (err != ESP_OK) {
+            ESP_LOGE("HTTP", "Error al detener el servidor HTTP: %s", esp_err_to_name(err));
+        } else {
+            ESP_LOGI("HTTP", "Servidor HTTP detenido correctamente.");
+        }
+        vTaskDelay(pdMS_TO_TICKS(1000));  // Esperar para liberar completamente los recursos
+        server = NULL;
     } else {
-        httpd_resp_sendstr(req, "Error: No se recibieron parámetros.");
+        ESP_LOGW("HTTP", "Intentando detener servidor HTTP, pero no estaba en ejecución.");
     }
-    /**
-     * Se retorna ESP_OK si la operacion es exitosa.
-     */
-    return ESP_OK;
 }
 
-/*
-El siguiente es un manejador para solicitudes HTTP que no coinciden
-con ninguna ruta especifica configurada en el servidor. Es un 
-redireccionador que responde con un código de estado HTTP 302
-not found y redirige al cliente a la pagina principal (/).
-
-informacion tecnica:
-
-parametros:
-httpd_req_t *req: Solicitud HTTP recibida por el servidor.
-*/  
-esp_err_t not_found_handler(httpd_req_t *req) {
-    /*
-    la siguiente funcion establece el codigo de estado HTTP de la
-    respuesta:
-    302 found -> es un codigo de redireccion que indica al cliente
-    que el recurso solicitado ha sido movido temporalmente a otra
-    ubicacion.
-
-    se usa comunmente para redirigir a otra URL.
-    */
-    httpd_resp_set_status(req, "302 Found");
-    /*
-    la siguiente función agrega el encabezado HTTP "location" a la 
-    respuesta.
-
-    informacion tecnica:
-
-    el encabezado Location especifica la nueva URL a la  que debe 
-    redirigirse el cliente (en este caso a la pagina principal del
-    servidor web "/")
-    */
-    httpd_resp_set_hdr(req, "Location", "/");
-    /*
-    La siguiente funcion envia la respuesta HTTP al cliente. en este
-    caso, el cuerpo de la respuesta es NULL (vacío) y la longitud es 0.
-    esto significa que la respuesta no incluye contenido, solo el
-    encabezado HTTP.
-    */
-    httpd_resp_send(req, NULL, 0);
-    return ESP_OK;
+void stop_server_task(void *arg) {
+    while (1) {
+        int signal;
+        if (xQueueReceive(stop_server_queue, &signal, portMAX_DELAY)) {
+            stop_http_server();
+        }
+    }
 }
+
+
 // Iniciar servidor HTTP
 /**
  * @brief Iniciar servidor HTTP
@@ -1216,21 +1075,6 @@ esp_err_t not_found_handler(httpd_req_t *req) {
  * @return Nada
  */
 void start_http_server(void) {
-    /**
-     * @brief la siguiente estrucutra permite configurar el servidor HTTP con 
-     * valores por defecto usando la macro HTTPD_DEFAULT_CONFIG().
-     * 
-     * algunos parametros predeterminados incluyen:
-     * @param[in] Puerto 80 (HTTP estándar)
-     * @param[in] max_open_sockets Número maximo de conexiones simultaneas
-     * @param[in] stack_size tamaño del buffer para solicitudes
-     */
-    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    /**
-     * @brief esta otra estructura declara un manejador para el servidor 
-     * HTTP, que se usará para registrar rutas y controladores.
-     */
-    httpd_handle_t server = NULL;
 
     /**
      * @brief inicia el servidor HTTP con la configuracion especificada
@@ -1242,105 +1086,71 @@ void start_http_server(void) {
      * En caso que ocurra un error el condicional no se cumplirá y 
      * se imprimirá un mensaje de error en la terminal a traves de ESO_LOG()
      */
-    if (httpd_start(&server, &config) == ESP_OK) {
-        /**
-         * @brief Configura un manejador para a ruta raiz que se activa
-         * cuando un cliente envía una solicitud GET a la URL (/).
-         * 
-         * los campos que maneja la estructura son:
-         * 
-         * @param[in] uri especifica la ruta raiz del servidor. para este caso es "/"
-         * @param[in] method tipo de solicitud a la cual responde el manejador. en este caso es GET.
-         * @param[in] handler asocia el manejador de solicitudes que para este caso es la funcion roor_handler()
-         * @param[in] user_ctx es un campo opcional para pasar datos personalizados al manejador. en este caso no se usa.
-         */
-        httpd_uri_t root = {
-            .uri = "/",
-            .method = HTTP_GET,
-            .handler = root_handler,
-            .user_ctx = NULL
-        };
-        /**
-         * la siguiente funcion registra el manejador en el servidor,
-         * asociandolo con la ruta especificada.
-         */
-        httpd_register_uri_handler(server, &root);
 
-        /**
-         * Configura y registra un manejador para la ruta /submit la cual
-         * se usa cuando el cliente presiona el boton "Enviar" en una pagina
-         * web alojada en la ESP32. En este caso se procesa la solicitud con
-         * submit_handle()
-         */
-        httpd_uri_t submit = {
-            .uri = "/submit",
-            .method = HTTP_GET,
-            .handler = submit_handler,
-            .user_ctx = NULL
-        };
-        httpd_register_uri_handler(server, &submit);
-        /**
-         * Configura y registra un manejador genérico para todas las rutas
-         * no definidas explicitamente.
-         */
-        httpd_uri_t redirect = {
-            .uri = "/*",
-            .method = HTTP_GET,
-            .handler = not_found_handler,
-            .user_ctx = NULL
-        };
-        httpd_register_uri_handler(server, &redirect);
+    esp_err_t ret = httpd_start(&server, &config);
+    if (ret == ESP_OK) {
+        ESP_LOGI("httpd_start", "servidor iniciado correctamente");
         
-        /**
-         * Este registro permite servir un archivo script.js almacenado en 
-         * SPIFFS si la página HTML de la ESP32 incluye:
-         * 
-         * <script src="/script.js"></script>
-         */
-        httpd_uri_t script = {
-            .uri = "/script.js",
-            .method = HTTP_GET,
-            .handler = script_handler,
-            .user_ctx = NULL
-        };
-        httpd_register_uri_handler(server, &script);
+        //registrar ruta principal "/"
+        if(httpd_register_uri_handler(server, &root)==ESP_OK){
+            ESP_LOGI("start_http_server", "Manejador de ruta raiz registrado correctamente");
+        }else{
+            ESP_LOGE("start_http_server", "Error al registrar el manejador de ruta raiz");
+        }
 
-        /**
-         * Esta ruta permite realizar un escaneo de redes wi-fi disponibles,
-         * cuando el cliente accede a /scan, el manejador scan_handler() devuelve un JSON
-         * con la lista de redes.
-         */
-        httpd_uri_t scan = {
-            .uri = "/scan",
-            .method = HTTP_GET,
-            .handler = scan_handler,
-            .user_ctx = NULL
-        };
-        httpd_register_uri_handler(server, &scan);
+        // registrar ruta submit
+        if (httpd_register_uri_handler(server, &submit))
+        {
+            ESP_LOGI("start_http_server", "Manejador de ruta submit registrada correctamente");
+        }else
+        {
+            ESP_LOGI("start_http_server", "error al registrar la ruta submit");
+        }
+        
+        // Registtrar rutas no definidas
+        if (httpd_register_uri_handler(server, &redirect))
+        {
+            ESP_LOGI("start_http_server", "Manejador de rutas desconocidas registrado correctamente");
+        }else
+        {
+            ESP_LOGI("start_http_server", "error al registrar la rutas desconocidas");
+        }
 
-        /*
-        httpd_uri_t status = {
-            .uri = "/status",
-            .method = HTTP_GET,
-            .handler = status_handler,
-            .user_ctx = NULL
-        };
-        httpd_register_uri_handler(server, &status);*/
+        // Registrar ruta del archivo script
+        if (httpd_register_uri_handler(server, &script))
+        {
+            ESP_LOGI("start_http_server", "Manejador de archivo javascript registrado correctamente");
+        }else
+        {
+            ESP_LOGI("start_http_server", "error al registrar la ruta del archivo javascript");
+        }
 
+        //registrar ruta scann
+        if (httpd_register_uri_handler(server, &scan))
+        {
+            ESP_LOGI("start_http_server", "Manejador de ruta scan registrada correctamente");
+        }else
+        {
+            ESP_LOGE("start_http_server", "error al registrar la ruta scan");
+        }
 
-    } else {
+    } else if (ret == ESP_ERR_HTTPD_ALLOC_MEM) {
+        ESP_LOGE("start_http_server", "Error al reservar memoria para el servidor HTTP");
+    } else if (ret == ESP_ERR_HTTPD_TASK) {
         /**
          * en caso de que el servidor no se haya iniciado se imprime el
          * error en el monitor serie.
          */
-        ESP_LOGE(TAG, "Error al iniciar el servidor HTTP");
+        ESP_LOGE("start_http_server", "Error al iniciar el servidor HTTP");
+    } else if (ret == ESP_ERR_INVALID_ARG){
+        ESP_LOGE("start_http_server", "Argumentos invalidos para iniciar httpd");
+    }
+    else {
+        ESP_LOGE("start_http_server", "Error: %s", esp_err_to_name(ret));
     }
 }
-
-
-
 void wifi_set_AP(void) {
-    ESP_LOGI(TAG, "Iniciando Wi-Fi en modo AP...");
+    ESP_LOGI("wifi_set_AP", "Iniciando Wi-Fi en modo AP...");
 
     if (!ap_netif) {
         ap_netif = esp_netif_create_default_wifi_ap();
@@ -1368,7 +1178,7 @@ void wifi_set_AP_STA(void) {
      * Se imprime en el monitor serie un mensaje informativo indicando que el
      * wifi esta siendo configurado en modo AP+STA.
      */
-    ESP_LOGI(TAG, "Iniciando Wi-Fi en modo AP+STA...");
+    ESP_LOGI("wifi_set_AP_STA", "Iniciando Wi-Fi en modo AP+STA...");
 
     /**
      * Se establece un condicional que evalue el estado actual del Wi-Fi
@@ -1388,12 +1198,12 @@ void wifi_set_AP_STA(void) {
     if (esp_wifi_get_mode(&current_mode) == ESP_OK) {
         // **Si está en modo STA, detener Wi-Fi antes de cambiar a AP+STA**
         if (current_mode == WIFI_MODE_STA) {
-            ESP_LOGI(TAG, "Wi-Fi estaba en modo STA, deteniéndolo antes de cambiar a AP+STA...");
+            ESP_LOGI("wifi_set_AP_STA", "Wi-Fi estaba en modo STA, deteniéndolo antes de cambiar a AP+STA...");
             ESP_ERROR_CHECK(esp_wifi_stop());
             vTaskDelay(pdMS_TO_TICKS(500));
         }
     } else {
-        ESP_LOGW(TAG, "No se pudo obtener el modo Wi-Fi. Continuando con la configuración...");
+        ESP_LOGW("wifi_set_AP_STA", "No se pudo obtener el modo Wi-Fi. Continuando con la configuración...");
     }
 
     /**
@@ -1462,11 +1272,11 @@ void wifi_set_AP_STA(void) {
     ESP_ERROR_CHECK(esp_wifi_start());
 
     //Se imprime el SSID del AP en el monitor serie
-    ESP_LOGI(TAG, "interfaz de configuración activa con SSID: %s", AP_SSID);
+    ESP_LOGI("wifi_set_AP_STA", "interfaz de configuración activa con SSID: %s", AP_SSID);
     
     //Se comprueba el estado del Wi-Fi y se imprime en monitor serie
     esp_wifi_get_mode(&current_mode);
-    ESP_LOGI(TAG, "Modo Wi-Fi actual: %d", current_mode);
+    ESP_LOGI("wifi_set_AP_STA", "Modo Wi-Fi actual: %d", current_mode);
     
     /**
      * Se enciende el LED RGB en color Cyan indicando que el portal cautivo
@@ -1546,7 +1356,7 @@ void wifi_system_init(void){
  * La accion consiste en borrar las credenciales Wi-Fi almacenadas en la memoria no volatil (NVS),
  * reinicializarla y volcer a configurar el dispositivo en modo Access Point
  */
-void clean_wifi_sta_connect_credentials(void *param) {
+void reset_handler(void *param) {
     /**
      * Esta variable almacena el momento en que el botón fue presionado, en milisegundos. Sí es 
      * 0 significa que el botón no está siendo presionaado actualmente.
@@ -1601,17 +1411,18 @@ void clean_wifi_sta_connect_credentials(void *param) {
                     button_held = true;
 
                     //Se imprime el mensaje "borrando toda la memoria NVS" en el monitor serie
-                    ESP_LOGI(TAG, "Borrando toda la memoria NVS...");
+                    ESP_LOGI("reset_handler", "Borrando toda la memoria NVS...");
 
+                    /*
                     // se borra la memoria NVS
                     ESP_ERROR_CHECK(nvs_flash_erase());
 
                     // Se vuelve a inicializar la memoria NVS
-                    ESP_ERROR_CHECK(nvs_flash_init());
+                    ESP_ERROR_CHECK(nvs_flash_init());*/
 
-                    // Se imprime el mensaje "memoria NVS borrada y reinicializada" en el monitor
-                    // serie.
-                    ESP_LOGI(TAG, "Memoria NVS borrada y reinicializada.");
+                    clear_wifi_credentials_from_nvs();
+                    ESP_LOGI("reset_handler", "Las credenciales Wi-Fi han sido eliminadas");
+
                     // Se detiene la lectura del ADC
                     ESP_ERROR_CHECK(stop_timer_adc());
                     // Se coloca la ESP32 en modo AP
@@ -1678,11 +1489,11 @@ void vTimerCallback(TimerHandle_t pxTimer)
      */
     if (ret == ESP_OK)
     {
-        ESP_LOGI(TAG_ADC, "Lectura del sensor: %d", adc_val);
+        ESP_LOGI("vTimerCallback", "Lectura del sensor: %d", adc_val);
     }
     else
     {
-        ESP_LOGE(TAG_ADC, "Error al leer el ADC: %s", esp_err_to_name(ret));
+        ESP_LOGE("vTimerCallback", "Error al leer el ADC: %s", esp_err_to_name(ret));
     }
 }
 
@@ -1715,8 +1526,10 @@ void app_main(void) {
      * Esta tarea se ejecuta en paralelo y está ligada a un botón de reset que, 
      * si se mantiene presionado durante cierto tiempo, borra las credenciales Wi-Fi.
      */
-    xTaskCreate(clean_wifi_sta_connect_credentials, "clean_wifi_sta_connect_credentials", 2048, NULL, 10, NULL);
+    xTaskCreate(reset_handler, "reset_handler", 2048, NULL, 3, NULL);
 
+    stop_server_queue = xQueueCreate(1, sizeof(int));  // Crear cola de tamaño 1
+    xTaskCreate(stop_server_task, "stop_server_task", 4096, NULL, 2, NULL);
     // Inicializar LED RGB del ESP32
     init_led_strip();
 
@@ -1761,6 +1574,394 @@ void app_main(void) {
     }
 }
 
+/* 
+la siguiente funcion es un manejador para solucitudes HTTP que se 
+utiliza para servir la pagina principal del servidor web.
+
+tiene como parametro el argumento httpd_req_t *req el cual es un
+puntero a la estructura de la solicitud HTTP que contiene informacion
+sobre la solicitud entrante como la ruta solicitada, los encabezados
+y más.
+*/ 
+esp_err_t root_handler(httpd_req_t *req) {
+    /**
+     * la funcion fopen() abre el archivo especificado en
+     * modo lectura ("r"). el archivo debe estar en la particion
+     * SPIFFS y disponible en la ruta /spiffs/index.html
+     * 
+     * file es un puntero al archivo que será leido. si el 
+     * archivo no se encuentra o no se puede abrir, fopen
+     * devuelve NULL.
+     * 
+     * la funcion fopen() tiene dos parametros:
+     * 
+     * @param[in] filename Ruta del archivo que se desea abrir
+     * @param[in] mode modo de apertura. este puede tener varios tipos:
+     *                 "r" - leer (error si el arhivo no existe)
+     *                 "w" - Escribir (crea el archivo si no existe o lo sobrescribe si ya existe)
+     *                 "a" - Añadir (escribe al final del archivo)
+     *                 "r+" - Leer y escribir
+     *                 "w+" - Leer y escribir (sobrescribe el archivo existente)
+     *                 "a+" - Leer y escribir (añade al final del archivo)
+     * 
+     * @note
+     * 
+     * El tipo de dato FILE en C representa una estructura
+     * definida en la biblioteca estándar <stdio.h> que se 
+     * utiliza para manejar operaciones de archivos. es una
+     * abstraccion que contiene toda la informacion necesaria
+     * para interactuar con un archivoen el sistema de
+     * archivos.
+     * 
+     * Es importante aclarar que FILE no es un tipo de datos
+     * primitivo como "int" o "char". Es una estructura
+     * definida internamente en la biblioteca estandar de C.
+     * 
+     * la definición de FILE puede variar dependiendo del
+     * sistema operativo y la implementación de la biblioteca
+     * C, pero tipicamente contiene:
+     * 
+     * 1) puntero al archivo en el sistema de archivos
+     * 
+     * 2) buffer interno para manejar datos durante la lectura
+     * y escritura
+     * 
+     * 3) indicador de fin de archivo (EOF)
+     * 
+     * 4) errores relacionados con la operacion de archivo
+     * 
+     * FILE se utiliza con las funciones de manejo de archivos
+     * como fopen, fclose, fread, fwrite, etc...
+     */
+    FILE *file = fopen("/spiffs/index.html", "r");
+
+    /**
+     * Si el puntero file tiene un valor de NULL significa
+     * que la funcion fopen no pudo abrir el archivo por lo
+     * cual se evalua la condicion !file ya que si file es 
+     * NULL, !file es True y por ende el programa entra a la 
+     * condición para imprimir en el monitor serie el mensaje
+     * "no se pudo abrir el archivo HTML" ademas de enviar un
+     * error 404 al servidor y retornar ESP_FAIL.
+     */
+    if (!file) {
+        ESP_LOGE("root_handler", "No se pudo abrir el archivo HTML");
+        httpd_resp_send_404(req);
+        return ESP_FAIL;
+    }
+
+    /**
+     * La siguiente función establece el encabezado HTTP 
+     * Content-Type de la respuesta como text/html. esto
+     * indica al navegador del cliente que el contenido
+     * que se esta enviando es una pagina HTML.
+     */
+    httpd_resp_set_type(req, "text/html");
+
+    /**
+     * Se declara un buffer temporal de 1024 bytes para
+     * almacenar partes del archivo mientras se lee
+     */
+    char buffer[1024];
+
+    /**
+     * size_t es un tipo de dato sin signo que se utiliza
+     * comúnmente para representar tamaños o conteos en C.
+     * Es el tipo de retorno de funciones como fread, por 
+     * lo cual es el tipo de dato adecuado para almacenar
+     * el tamaño del archivo.
+     */
+    size_t read_bytes;
+
+    /**
+     * El siguiente ciclo permite enviar el contenido html
+     * al servidor por chunks o "paquetes". para ello primero
+     * se usa la funcion fread() la cual lee datos desde el
+     * archivo (file) en bloques del tamaño especificado 
+     * (1024 bytes) y los guarda en el búfer (buffer).
+     * 
+     * la funcion fread tiene los siguientes parametros:
+     * @param[out] buffer Direccion del buffer donde se 
+     * almacenan los datos leidos
+     * @param[in] 1 tamaño de cada elemento que se lee 
+     * (1 byte en este caso)
+     * @param[in] sizeofBuffer maximo número de elementos 
+     * a leer (hasta 1024 bytes en este caso)
+     * 
+     * Al ser invocada con los limites establecidos, la 
+     * función devuelve la cantidad real de bytes leidos
+     * desde el archivo en cada iteración y guarda el conteo 
+     * dentro de read_bytes. si fread encuentra menos bytes 
+     * (por ejemplo al final del archivo), el valor será
+     * menor que el tamaño del buffer.
+     * 
+     * Si ocurre un error o se alcanza el final del archiv
+     * fread() devuelve 0.
+     * 
+     * con esto en mente se puede evaluar si read_bytes es
+     * mayor a 0. en tal caso se debe enviar el paquete de 
+     * datos al cliente. en caso que readbytes sea 0
+     * significa que se llegó al final del archivo y se 
+     * debe finalizar el ciclo.
+     */
+    while ((read_bytes = fread(buffer, 1, sizeof(buffer), file)) > 0) {
+        /**
+         * con la funcion httpd_resp_send_chunk() se envia
+         * el contenido leido en el fuffer como un fragmento
+         * (chunk) al cliente. el tamaño del fragmento es 
+         * igual a read_bytes.
+         */
+        httpd_resp_send_chunk(req, buffer, read_bytes);
+    }
+    /**
+     * A continuacion se envia un fragmento vacio (NULL) de tamaño
+     * 0 al cliente. esto indica que ya no se enviarán más datos. 
+     * esta acción es obligatoria para finalizar una respuesta
+     * con "chunked encoding"
+     */
+    httpd_resp_send_chunk(req, NULL, 0); 
+    /**
+     * Finalmente se cierra el archivo abierto por fopen()
+     * para liberar recursos del sistema.
+     */
+    fclose(file);
+    return ESP_OK;
+}
+
+/**
+ * @brief Este es un manejador HTTP que procesa una solicitud enviada desde un formulario
+ * web al servidor alojado en la ESP32. Su proposito principale es extraer las credenciales
+ * Wi-Fi (SSID y contraseña) del formulario, decodificarlas, almacenarlas en la memoria no
+ * volatil (NVS) y cambiar la ESP32 al modo estación (STA) para conectarse a una red Wi-Fi
+ * 
+ * @param[in] req puntero a la estructura httpd_req_t que representa la solicitud HTTP
+ * recibida. Esta estructura contiene informacion relevante como los parametros enviados
+ * desde el formulario web.
+ * 
+ * @return Devuelve un codigo de error o éxito. ESP_OK indica que la función se ejecutó
+ * correctamente.
+ */
+esp_err_t submit_handler(httpd_req_t *req) {
+    // se declara un buffer de 100 bytes para extraer la cadena de consulta de la URL
+    char param[100];
+    /**
+     * La función httpd_req_get_url_query_str() permite recibir el query como una cadena
+     * de caracteres. tiene como parametros:
+     * 
+     * 1- estructura de la solicitud http recibida.
+     * 2- buffer donde se almacenará la cadena de caracteres, en este caso es la variable
+     * param.
+     * 3- tamaño del buffer donde se almacenará ña cadena de caracteres.
+     * 
+     * Si la función se ejecuta correctamente devuelve ESP_OK lo que significa que hay datos
+     * que procesar. por el contrario se debe devolver un mensaje de error al cliente.
+     */
+    if (httpd_req_get_url_query_str(req, param, sizeof(param)) == ESP_OK) {
+        /**
+         * Los buffers ssid_encoded y password_encoded sirven para almacenar el SSID y la
+         * contraseña tal como se reciben en formato codificado (URL encoding)
+         */
+        char ssid_encoded[50];
+        char password_encoded[50];
+        /**
+         * Los buffers ssid y password se usan para almacenar los valores decodificados
+         * despues de eliminar el URL encoding
+         */
+        char ssid[50];
+        char password[50];
+
+        /**
+         * Se buscan los parametros especificos en la cadena param y se almacenan sus 
+         * valores en los buffers ssid_encoded y password_encoded. la condicion indica que
+         * deben recibirse ambos parametros para entrar en "verdadero".
+         * 
+         * Es importante aclarar que la función httpd_query_key_value permite buscar 
+         * en la cadena de consulta el parametro especificado y almacenarlo en un buffer 
+         * para su posterior uso. Si la operación es correcta devuelve ESP_OK.
+         */
+
+        if (httpd_query_key_value(param, "SSID", ssid_encoded, sizeof(ssid_encoded)) == ESP_OK &&
+            httpd_query_key_value(param, "PASSWORD", password_encoded, sizeof(password_encoded)) == ESP_OK) {
+
+            // Decodificar SSID y contraseña
+            url_decode(ssid_encoded, ssid, sizeof(ssid));
+            url_decode(password_encoded, password, sizeof(password));
+
+            // Se imprimen las credenciales decodificadas en el monitor serial
+            ESP_LOGI("submit_handler", "SSID Decodificado: %s", ssid);
+            ESP_LOGI("submit_handler", "PASSWORD Decodificado: %s", password);
+
+            // **Enviar respuesta indicando que se intentará conectar**
+            httpd_resp_set_type(req, "text/plain");
+            httpd_resp_send(req, "Intentando conectar a la red Wi-Fi...", strlen("Intentando conectar a la red Wi-Fi..."));
+
+            // **Ahora iniciamos la conexión después de enviar la respuesta**
+            vTaskDelay(pdMS_TO_TICKS(1000));  // Pequeña espera para evitar interferencias
+            esp_err_t connection_state = wifi_connect_STA(ssid, password);
+            if (connection_state == ESP_OK) {
+                ESP_LOGI("submit_handler", "Conexión establecida correctamente.");
+                
+                int stop_signal = 1;
+                xQueueSend(stop_server_queue, &stop_signal, portMAX_DELAY);
+                wifi_set_STA();
+                save_wifi_config_to_nvs(WIFI_MODE_STA, ssid, password);
+                //se habilita el ahorro de bateria
+                ESP_LOGI("submit_handler", "Habilitando ahorro de energía Wi-Fi...");
+                ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MIN_MODEM));
+                //enciende la lectura del ADC
+                ESP_ERROR_CHECK(start_timer_adc());
+            } 
+            else {
+                ESP_LOGE("submit_handler", "Error desconocido al conectarse. verifique que las credenciales sean correctas y que la red este activa");
+                for (size_t i = 0; i < 3; i++)
+                {
+                    set_led_color(COLOR_MAGENTA);
+                    vTaskDelay(pdMS_TO_TICKS(500));
+                    set_led_color(TURN_OFF);
+                    vTaskDelay(pdMS_TO_TICKS(500));
+                }
+                set_led_color(COLOR_CYAN);
+                const char redirect_html[] = "<html><head>"
+                             "<meta http-equiv='refresh' content='0; url=/' />"
+                             "<script>window.location.href='/';</script>"
+                             "</head></html>";
+                httpd_resp_set_type(req, "text/html");
+                httpd_resp_send(req, redirect_html, strlen(redirect_html));
+
+            }
+
+            return ESP_OK;
+        } else {
+            httpd_resp_sendstr(req, "Error al procesar los datos del formulario.");
+        }
+    } else {
+        httpd_resp_sendstr(req, "Error: No se recibieron parámetros.");
+    }
+    /**
+     * Se retorna ESP_OK si la operacion es exitosa.
+     */
+    return ESP_OK;
+}
+
+/*
+El siguiente es un manejador para solicitudes HTTP que no coinciden
+con ninguna ruta especifica configurada en el servidor. Es un 
+redireccionador que responde con un código de estado HTTP 302
+not found y redirige al cliente a la pagina principal (/).
+
+informacion tecnica:
+
+parametros:
+httpd_req_t *req: Solicitud HTTP recibida por el servidor.
+*/  
+esp_err_t not_found_handler(httpd_req_t *req) {
+    /*
+    la siguiente funcion establece el codigo de estado HTTP de la
+    respuesta:
+    302 found -> es un codigo de redireccion que indica al cliente
+    que el recurso solicitado ha sido movido temporalmente a otra
+    ubicacion.
+
+    se usa comunmente para redirigir a otra URL.
+    */
+    httpd_resp_set_status(req, "302 Found");
+    /*
+    la siguiente función agrega el encabezado HTTP "location" a la 
+    respuesta.
+
+    informacion tecnica:
+
+    el encabezado Location especifica la nueva URL a la  que debe 
+    redirigirse el cliente (en este caso a la pagina principal del
+    servidor web "/")
+    */
+    httpd_resp_set_hdr(req, "Location", "/");
+    /*
+    La siguiente funcion envia la respuesta HTTP al cliente. en este
+    caso, el cuerpo de la respuesta es NULL (vacío) y la longitud es 0.
+    esto significa que la respuesta no incluye contenido, solo el
+    encabezado HTTP.
+    */
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
+esp_err_t script_handler(httpd_req_t *req) {
+    FILE *file = fopen("/spiffs/script.js", "r");
+
+    if (!file) {
+        ESP_LOGE("script_handler", "No se pudo abrir el archivo script.js");
+        httpd_resp_send_404(req);
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/javascript");
+
+    char buffer[1024];
+    size_t read_bytes;
+
+    while ((read_bytes = fread(buffer, 1, sizeof(buffer), file)) > 0) {
+        httpd_resp_send_chunk(req, buffer, read_bytes);
+    }
+
+    httpd_resp_send_chunk(req, NULL, 0);
+    fclose(file);
+    return ESP_OK;
+}
+
+esp_err_t scan_handler(httpd_req_t *req) {
+
+    ESP_LOGI("scan_handler", "Ejecutando escaneo de redes...");
+
+    wifi_scan_config_t scan_config = {
+        .ssid = NULL,
+        .bssid = NULL,
+        .channel = 0,
+        .show_hidden = true
+    };
+
+    ESP_LOGI("scan_handler", "Iniciando escaneo de redes...");
+    ESP_ERROR_CHECK(esp_wifi_scan_start(&scan_config, true)); // Realizar escaneo sincrónico
+
+    uint16_t ap_count = 0;
+    esp_wifi_scan_get_ap_num(&ap_count);
+    ESP_LOGI("scan_handler", "Número de redes encontradas: %d", ap_count);
+
+    if (ap_count == 0) {
+        ESP_LOGW("scan_handler", "No se encontraron redes Wi-Fi.");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "[]", strlen("[]")); // Enviar lista vacía al cliente
+        return ESP_OK;
+    }
+
+    // **⚠ Reservar memoria dinámicamente para evitar stack overflow ⚠**
+    wifi_ap_record_t *ap_records = (wifi_ap_record_t *)malloc(ap_count * sizeof(wifi_ap_record_t));
+    if (!ap_records) {
+        ESP_LOGE("scan_handler", "Error: No se pudo asignar memoria para los registros de redes.");
+        httpd_resp_send_500(req); // Responder con error 500
+        return ESP_FAIL;
+    }
+
+    ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&ap_count, ap_records));
+
+    char json_response[1024] = "[";
+    for (int i = 0; i < ap_count; i++) {
+        ESP_LOGI("scan_handler", "SSID detectado: %s", ap_records[i].ssid);
+        char ssid_entry[128];
+        snprintf(ssid_entry, sizeof(ssid_entry), "\"%s\"%s", ap_records[i].ssid, (i < ap_count - 1) ? "," : "");
+        strcat(json_response, ssid_entry);
+    }
+    strcat(json_response, "]");
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json_response, strlen(json_response));
+
+    // Liberar memoria despues de usarla|
+    free(ap_records); 
+
+    return ESP_OK;
+}
+
 /**
  * @brief Establecer temporizador del ADC
  * 
@@ -1789,12 +1990,18 @@ esp_err_t set_timer_adc(void)
      * @return retorna el handler del timer que se acaba de crear
      * 
      */
+    ESP_LOGI("MAIN", "Configurando prioridad del Timer Service Task...");
+    vTaskPrioritySet(xTimerGetTimerDaemonTaskHandle(), 2);
     xTimerADC = xTimerCreate(
         "Timer",
         (pdMS_TO_TICKS(SAMPLE_PERIOD_MS)),
         pdTRUE,
         (void *)0,
         vTimerCallback);
+    
+    vTaskDelay(pdMS_TO_TICKS(10000));
+    UBaseType_t priority = uxTaskPriorityGet(xTimerGetTimerDaemonTaskHandle());
+    ESP_LOGI("set_timer_adc", "Prioridad actual del Timer Service Task: %d", priority);
 
     /**
      * En el caso que no se haya creado correctamente el handler del timer 
@@ -1802,7 +2009,7 @@ esp_err_t set_timer_adc(void)
      */
     if (xTimerADC == NULL)
     {
-        ESP_LOGE(TAG_ADC, "Error creando el timer.");
+        ESP_LOGE("set_timer_adc", "Error creando el timer.");
         return ESP_FAIL;
     }
 
@@ -1814,16 +2021,16 @@ esp_err_t start_timer_adc()
 {
     if (xTimerADC == NULL)
     {
-        ESP_LOGE(TAG_ADC, "El timer no ha sido inicializado.");
+        ESP_LOGE("start_timer_adc", "El timer no ha sido inicializado.");
         return ESP_FAIL;
     }
 
     if (xTimerStart(xTimerADC, 0) != pdPASS)
     {
-        ESP_LOGE(TAG_ADC, "Error al iniciar el timer.");
+        ESP_LOGE("start_timer_adc", "Error al iniciar el timer.");
         return ESP_FAIL;
     }
-    ESP_LOGI(TAG_ADC, "Timer iniciado.");
+    ESP_LOGI("start_timer_adc", "Timer iniciado.");
     return ESP_OK;
 }
 
@@ -1831,15 +2038,15 @@ esp_err_t stop_timer_adc()
 {
     if (xTimerADC == NULL)
     {
-        ESP_LOGE(TAG_ADC, "El timer no ha sido inicializado.");
+        ESP_LOGE("stop_timer_adc", "El timer no ha sido inicializado.");
         return ESP_FAIL;
     }
     if (xTimerStop(xTimerADC, 0) != pdPASS)
     {
-        ESP_LOGE(TAG_ADC, "Error al detener el timer.");
+        ESP_LOGE("stop_timer_adc", "Error al detener el timer.");
         return ESP_FAIL;
     }
-    ESP_LOGI(TAG_ADC, "Timer detenido.");
+    ESP_LOGI("TAG_ADC", "Timer detenido.");
     return ESP_OK;
 }
 
