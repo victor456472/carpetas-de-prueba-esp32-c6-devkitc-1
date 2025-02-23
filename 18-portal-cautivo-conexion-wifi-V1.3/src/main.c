@@ -664,7 +664,11 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
         /**
          * Se llama nuevamente a esp_wifi_connect() para reintentar la conexión.
          */
-        esp_wifi_connect(); // Reintentar conexión
+        if(esp_wifi_connect()==ESP_OK){
+            ESP_LOGI("event_handler", "Conectado correctamente");
+        }else{
+            ESP_LOGE("event_handler", "Error al conectar");
+        } // Reintentar conexión
 
         /**
          * Se cambia el color del LED RGB a rojo (COLOR RED), indicando que la conexion
@@ -707,6 +711,7 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
         wifi_mode_t mode = WIFI_MODE_NULL; 
         if (esp_wifi_get_mode(&mode) != ESP_OK) {
             ESP_LOGW("wifi_set_STA", "No se pudo obtener el modo Wi-Fi. Asegurar que Wi-Fi está iniciado.");
+        }else{
             if(mode == WIFI_MODE_STA){
                 //enciende la lectura del ADC
                 ESP_ERROR_CHECK(start_timer_adc());
@@ -2018,7 +2023,10 @@ esp_err_t submit_handler(httpd_req_t *req) {
                 start_IP_events();
 
                 save_wifi_config_to_nvs(WIFI_MODE_STA, ssid, password);
-                
+                ESP_ERROR_CHECK(esp_wifi_connect());
+                wifi_mode_t mode_test = read_wifi_config_from_nvs(ssid, sizeof(ssid), password, sizeof(password));
+                ESP_LOGI("submit_handler", "Credenciales en NVS: mode = %d, SSID = %s, PASSWORD = %s", mode_test, ssid, password);
+
                 //se habilita el ahorro de bateria
                 //ESP_LOGI("submit_handler", "Habilitando ahorro de energía Wi-Fi...");
                 //ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MIN_MODEM));
