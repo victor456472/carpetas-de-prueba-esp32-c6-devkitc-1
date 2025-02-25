@@ -1628,7 +1628,13 @@ void reset_handler(void *param) {
                     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
                     ESP_LOGI("reset_handler", "ahorro de energia deshabilitado");
                     // Se conecta el servidor http
-                    // start_http_server();
+                    if (server == NULL){
+                        ESP_LOGI("reset_handler", "iniciando el servidor http...");
+                        init_spiffs();
+                        start_http_server();
+                    }else{
+                        ESP_LOGW("reset_handler", "El servidor http ya estaba iniciado.");
+                    }
                 }
             }
         /**
