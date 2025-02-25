@@ -31,6 +31,7 @@
 #define COLOR_RED 255,0,0
 #define COLOR_YELLOW 255,255,0
 #define COLOR_MAGENTA 255, 0, 193
+#define COLOR_ORANGE 255, 80, 40
 #define TURN_OFF 0, 0, 0
 
 #define NVS_WIFICONFIG "wifi_config"
@@ -42,7 +43,7 @@
 #define HOLD_TIME_MS 10000   // Tiempo en milisegundos para considerar que el botón está presionado (10 segundos)
 
 //parametros del ADC
-#define SAMPLE_PERIOD_MS 500
+#define SAMPLE_PERIOD_MS 100
 #define ADC_UNIT ADC_UNIT_1
 #define ADC_CHANNEL ADC_CHANNEL_5
 #define ADC_ATTENUATION ADC_ATTEN_DB_6
@@ -930,15 +931,7 @@ esp_err_t wifi_connect_STA(const char *ssid, const char *password) {
      * Imprime en la terminal el nombre de la red a la que se intentará conectar.
      * Esto facilita la depuración y el seguimiento del estado de conexión.
      */
-    ESP_LOGI("wifi_connect_STA", "Conectando a la red Wi-Fi: %s...", ssid);
-    
-    /**
-     * Llama a start_IP_events(), que registra eventos relacionados 
-     * con la asignación de direcciones IP.
-     */
-    ESP_LOGI("wifi_connect_STA", "Memoria libre antes de start_IP_events: %lu", (unsigned long)esp_get_free_heap_size());
-    start_IP_events();
-    ESP_LOGI("wifi_connect_STA", "Memoria libre después de start_IP_events: %lu", (unsigned long)esp_get_free_heap_size());
+    ESP_LOGI("wifi_connect_STA", "Conectando a la red Wi-Fi: %s con la contraseña %s...", ssid, password);
     
     /**
      * Se obtiene el modo Wi-Fi actual usando esp_wifi_get_mode(&mode).
@@ -977,7 +970,13 @@ esp_err_t wifi_connect_STA(const char *ssid, const char *password) {
      * de la ESP32.
      */
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    
+    /**
+     * Llama a start_IP_events(), que registra eventos relacionados 
+     * con la asignación de direcciones IP.
+     */
+    ESP_LOGI("wifi_connect_STA", "Memoria libre antes de start_IP_events: %lu", (unsigned long)esp_get_free_heap_size());
+    start_IP_events();
+    ESP_LOGI("wifi_connect_STA", "Memoria libre después de start_IP_events: %lu", (unsigned long)esp_get_free_heap_size());
     /**
      * Se muestra un mensaje en la terminal indicando que la ESP32 está intentando conectar.
      */
@@ -991,7 +990,7 @@ esp_err_t wifi_connect_STA(const char *ssid, const char *password) {
 
     //Se inicia el proceso de conexión Wi-Fi con esp_wifi_connect()
 
-    ESP_ERROR_CHECK(esp_wifi_connect());
+    esp_err_t err = esp_wifi_connect();
 
     /**
      * Se implementa un bucle que espera hasta 10 segundos (10 
@@ -1019,7 +1018,7 @@ esp_err_t wifi_connect_STA(const char *ssid, const char *password) {
      * Si la conexión no se estableció después de 10 segundos, se imprime una 
      * advertencia y la función retorna ESP_FAIL.
      */
-    if (wifi_connected) {
+    if (wifi_connected && (err==ESP_OK)) {
         start_WIFI_events();
         ESP_LOGI("wifi_connect_STA", "Conexión exitosa a: %s", ssid);
         return ESP_OK;
@@ -1623,8 +1622,11 @@ void reset_handler(void *param) {
                     ESP_ERROR_CHECK(stop_timer_adc());
                     // Se coloca la ESP32 en modo AP
                     wifi_set_AP_STA();
+                    wifi_connected = false;
                     // deshabilitar ahorro de batería
-                    // ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+                    ESP_LOGI("reset_handler", "deshabilitando ahorro de energía...");
+                    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+                    ESP_LOGI("reset_handler", "ahorro de energia deshabilitado");
                     // Se conecta el servidor http
                     // start_http_server();
                 }
@@ -1730,6 +1732,9 @@ void app_main(void) {
     //xTaskCreate(stop_server_task, "stop_server_task", 4096, NULL, 2, NULL);
     // Inicializar LED RGB del ESP32
     init_led_strip();
+    vTaskDelay(pdMS_TO_TICKS(200));
+    set_led_color(COLOR_ORANGE);
+    vTaskDelay(pdMS_TO_TICKS(10000));
 
     /**
      * Se crean variables para almacenar el SSID y la contraseña de la red Wi-Fi 
@@ -2028,8 +2033,9 @@ esp_err_t submit_handler(httpd_req_t *req) {
                 ESP_LOGI("submit_handler", "Credenciales en NVS: mode = %d, SSID = %s, PASSWORD = %s", mode_test, ssid, password);
 
                 //se habilita el ahorro de bateria
-                //ESP_LOGI("submit_handler", "Habilitando ahorro de energía Wi-Fi...");
-                //ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MIN_MODEM));
+                ESP_LOGI("submit_handler", "Habilitando ahorro de energía Wi-Fi...");
+                ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MIN_MODEM));
+                ESP_LOGI("submit_handler", "ahorro de energia habilitado");
             } 
             else {
                 ESP_LOGE("submit_handler", "Error desconocido al conectarse. verifique que las credenciales sean correctas y que la red este activa");
@@ -2219,7 +2225,6 @@ esp_err_t set_timer_adc(void)
         (void *)0,
         vTimerCallback);
     
-    vTaskDelay(pdMS_TO_TICKS(10000));
     UBaseType_t priority = uxTaskPriorityGet(xTimerGetTimerDaemonTaskHandle());
     ESP_LOGI("set_timer_adc", "Prioridad actual del Timer Service Task: %d", priority);
 
