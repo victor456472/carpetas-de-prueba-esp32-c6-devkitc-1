@@ -1023,6 +1023,7 @@ esp_err_t wifi_connect_STA(const char *ssid, const char *password) {
         ESP_LOGI("wifi_connect_STA", "Conexión exitosa a: %s", ssid);
         return ESP_OK;
     } else {
+        stop_IP_events();
         ESP_LOGW("wifi_connect_STA", "No se pudo conectar a: %s, con la contraseña: %s", ssid, password);
         return ESP_FAIL;
     }
@@ -1612,7 +1613,15 @@ void reset_handler(void *param) {
                         ESP_LOGI("reset_handler", "Eventos WIFI desregistrados correctamente.");
                     } else {
                         ESP_LOGW("reset_handler", "Los eventos WIFI no estaban registrados o hubo un error.");
-                    }                    
+                    }
+
+                    if(wifi_connected == true){ 
+                        ESP_LOGW("reset_handler", "desconectandose de la red");
+                        ESP_ERROR_CHECK(esp_wifi_disconnect());
+                        ESP_LOGI("reset_handler", "esp desconectada");
+                        vTaskDelay(pdMS_TO_TICKS(200));
+                    }
+
                     //Se imprime el mensaje "borrando toda la memoria NVS" en el monitor serie
                     ESP_LOGI("reset_handler", "Borrando toda la memoria NVS...");
                     clear_wifi_credentials_from_nvs();
