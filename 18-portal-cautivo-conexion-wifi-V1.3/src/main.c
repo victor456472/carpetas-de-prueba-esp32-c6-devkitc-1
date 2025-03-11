@@ -1023,6 +1023,9 @@ esp_err_t wifi_connect_STA(const char *ssid, const char *password) {
         ESP_LOGI("wifi_connect_STA", "Conexión exitosa a: %s", ssid);
         return ESP_OK;
     } else {
+        ESP_LOGW("wifi_connect_STA", "abortando intento de conexión...");
+        ESP_ERROR_CHECK(esp_wifi_disconnect());
+        ESP_LOGI("wifi_connect_STA", "intento de conexión abortado");
         stop_IP_events();
         ESP_LOGW("wifi_connect_STA", "No se pudo conectar a: %s, con la contraseña: %s", ssid, password);
         return ESP_FAIL;
