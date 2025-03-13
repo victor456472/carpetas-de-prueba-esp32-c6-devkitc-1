@@ -1362,6 +1362,10 @@ void wifi_set_AP_STA(void) {
         // **Si está en modo STA, detener Wi-Fi antes de cambiar a AP+STA**
         if (current_mode == WIFI_MODE_STA) {
             ESP_LOGI("wifi_set_AP_STA", "Wi-Fi estaba en modo STA, deteniéndolo antes de cambiar a AP+STA...");
+            if(wifi_connected){
+                esp_wifi_disconnect();
+                wifi_connected = false;
+            }
             ESP_ERROR_CHECK(esp_wifi_stop());
             ESP_LOGI("wifi_set_AP_STA", "modo STA detenido");
             vTaskDelay(pdMS_TO_TICKS(500));
@@ -1383,11 +1387,15 @@ void wifi_set_AP_STA(void) {
      * se destruye para prevenir fugas de memoria y conflictos de reconfiguracón.
      */
     if (ap_netif) {
+        ESP_LOGW("wifi_set_AP_STA", "la interfaz AP estaba iniciada, destruyendo interfaz...");
         esp_netif_destroy(ap_netif);
+        ESP_LOGI("wifi_set_AP_STA", "Interfaz destruida correctamente");
         ap_netif = NULL;
     }
     if (sta_netif) {
+        ESP_LOGW("wifi_set_AP_STA", "la interfaz STA estaba iniciada, destruyendo interfaz...");
         esp_netif_destroy(sta_netif);
+        ESP_LOGI("wifi_set_AP_STA", "la interfaz STA estaba iniciada, destruyendo interfaz...");
         sta_netif = NULL;
     }
 
