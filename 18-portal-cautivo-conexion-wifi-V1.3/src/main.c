@@ -1438,7 +1438,7 @@ void wifi_set_AP_STA(void) {
             .password = AP_PASSWORD,
             .ssid_len = strlen(AP_SSID),
             .channel = 3,
-            .max_connection = MAX_STA_CONN,
+            .max_connection = 1,
             .authmode = WIFI_AUTH_WPA_WPA2_PSK,
         },
     };
