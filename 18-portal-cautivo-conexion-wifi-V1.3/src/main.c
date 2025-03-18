@@ -50,7 +50,7 @@
 #define ADC_BITWIDTH ADC_BITWIDTH_12
 
 static bool events_ip_registered = false;
-static bool events_wifi_registered = false;
+static bool event_sta_disconnected_registered = false;
 
 SemaphoreHandle_t nvs_mutex;
 
@@ -68,7 +68,7 @@ static adc_oneshot_unit_handle_t adc_handle = NULL;
 bool wifi_connected = false; 
 
 //identificadores de handlers de eventos IP y WIFI:
-esp_event_handler_instance_t instance_any_id;
+esp_event_handler_instance_t instance_sta_disconnected;
 esp_event_handler_instance_t instance_got_ip;
 
 //estado de creación de interfaces STA y AP
@@ -851,30 +851,29 @@ void start_IP_events(void){
 /**
  * @brief Iniciar eventos Wi-Fi
  * 
- * La función start_WIFI_events() registra un manejador de eventos de Wi-Fi 
+ * La función start_STA_DISCONNECTED_event() registra un manejador de eventos de Wi-Fi 
  * en la ESP32, permitiendo que la función event_handler() reciba y procese eventos 
  * relacionados con Wi-Fi (conexión, desconexión, escaneo, etc.).
  */
-void start_WIFI_events(void){
+void start_STA_DISCONNECTED_event(void){
     /**
      * Registra un manejador de eventos, permitiendo que la ESP32 detecte y procese 
      * eventos específicos.
      * Esto significa que cada vez que ocurra un evento de Wi-Fi, la función event_handler() 
      * será ejecutada.
      */
-    if(!events_wifi_registered){
-        ESP_LOGI("start_WIFI_events", "Iniciando eventos Wi-Fi...");
+    if(!event_sta_disconnected_registered){
+        ESP_LOGI("start_STA_DISCONNECTED_event", "Iniciando evento STA_DISCONNECTED...");
         ESP_ERROR_CHECK(esp_event_handler_instance_register(
             WIFI_EVENT,
-            ESP_EVENT_ANY_ID,
+            WIFI_EVENT_STA_DISCONNECTED,
             &event_handler,
             NULL,
-            &instance_any_id
+            &instance_sta_disconnected
         ));
-        events_wifi_registered=true;
-        ESP_LOGI("start_WIFI_events", "Eventos Wi-Fi iniciados");
+        event_sta_disconnected_registered=true;
+        ESP_LOGI("start_STA_DISCONNECTED_event", "Evento STA_DISCONNECTED iniciado");
     }
-
 }
 esp_err_t stop_IP_events() {
     if (events_ip_registered) {
@@ -894,16 +893,16 @@ esp_err_t stop_IP_events() {
 }
 
 
-esp_err_t stop_WIFI_events() {
-    if (events_wifi_registered) {
+esp_err_t stop_STA_DISCONNECTED_event() {
+    if (event_sta_disconnected_registered) {
         esp_err_t err = esp_event_handler_instance_unregister(WIFI_EVENT, 
-            ESP_EVENT_ANY_ID, 
-            instance_any_id);
+            WIFI_EVENT_STA_DISCONNECTED, 
+            instance_sta_disconnected);
         if (err == ESP_OK) {
-            ESP_LOGI("stop_WIFI_events", "Evento WIFI_EVENT_ANY_ID desregistrado exitosamente.");
-            events_wifi_registered = false;
+            ESP_LOGI("stop_STA_DISCONNECTED_event", "Evento WIFI_STA_DISCONNECTED desregistrado exitosamente.");
+            event_sta_disconnected_registered = false;
         } else {
-            ESP_LOGE("stop_WIFI_events", "Error al desregistrar evento Wi-Fi: %s", esp_err_to_name(err));
+            ESP_LOGE("stop_STA_DISCONNECTED_event", "Error al desregistrar evento Wi-Fi: %s", esp_err_to_name(err));
         }
         return err;
     }
@@ -1011,7 +1010,7 @@ esp_err_t wifi_connect_STA(const char *ssid, const char *password) {
 
     /**
      * Si wifi_connected == true después de esperar, significa 
-     * que la conexión fue exitosa. En tal caso se inicia start_WIFI_events(), 
+     * que la conexión fue exitosa. En tal caso se inicia start_STA_DISCONNECTED_event(), 
      * lo que permite manejar eventos Wi-Fi como desconexión o reconexión y se
      * culmina retornando ESP_OK.
      * 
@@ -1019,7 +1018,7 @@ esp_err_t wifi_connect_STA(const char *ssid, const char *password) {
      * advertencia y la función retorna ESP_FAIL.
      */
     if (wifi_connected && (err==ESP_OK)) {
-        start_WIFI_events();
+        start_STA_DISCONNECTED_event();
         ESP_LOGI("wifi_connect_STA", "Conexión exitosa a: %s", ssid);
         return ESP_OK;
     } else {
@@ -1620,7 +1619,7 @@ void reset_handler(void *param) {
                     } else {
                         ESP_LOGW("reset_handler", "Los eventos IP no estaban registrados o hubo un error.");
                     }                    
-                    if (stop_WIFI_events() == ESP_OK) {
+                    if (stop_STA_DISCONNECTED_event() == ESP_OK) {
                         ESP_LOGI("reset_handler", "Eventos WIFI desregistrados correctamente.");
                     } else {
                         ESP_LOGW("reset_handler", "Los eventos WIFI no estaban registrados o hubo un error.");
@@ -1790,7 +1789,7 @@ void app_main(void) {
      */
     if (mode == WIFI_MODE_STA && strlen(ssid) > 0 && strlen(password) > 0) {
         // Si hay credenciales, iniciar en modo STA
-        start_WIFI_events();
+        start_STA_DISCONNECTED_event();
         wifi_set_STA();
         wifi_connect_STA(ssid, password);
     } else {
@@ -2035,7 +2034,7 @@ esp_err_t submit_handler(httpd_req_t *req) {
                 //int stop_signal = 1;
                 //xQueueSend(stop_server_queue, &stop_signal, portMAX_DELAY);
                 //vTaskDelay(pdMS_TO_TICKS(500));
-                if(stop_WIFI_events()==ESP_OK){
+                if(stop_STA_DISCONNECTED_event()==ESP_OK){
                     ESP_LOGI("submit_handler", "Eventos wifi detenidos correctamente");
                 }else
                 {
@@ -2050,7 +2049,7 @@ esp_err_t submit_handler(httpd_req_t *req) {
                 }
                 
                 wifi_set_STA();
-                start_WIFI_events();
+                start_STA_DISCONNECTED_event();
                 start_IP_events();
 
                 save_wifi_config_to_nvs(WIFI_MODE_STA, ssid, password);
