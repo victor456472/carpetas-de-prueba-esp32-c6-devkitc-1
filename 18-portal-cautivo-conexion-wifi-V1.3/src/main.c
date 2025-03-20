@@ -17,6 +17,7 @@
 #include "esp_adc/adc_oneshot.h"
 #include "esp_wifi_types.h"
 #include "lwip/sockets.h"
+#include "esp_mac.h"
 
 
 #define AP_SSID "RED ESP32 VICTOR"
@@ -32,6 +33,7 @@
 #define COLOR_YELLOW 255,255,0
 #define COLOR_MAGENTA 255, 0, 193
 #define COLOR_ORANGE 255, 80, 40
+#define COLOR_AQUAMARINE 40,255,90
 #define TURN_OFF 0, 0, 0
 
 #define NVS_WIFICONFIG "wifi_config"
@@ -51,6 +53,8 @@
 
 static bool events_ip_registered = false;
 static bool event_sta_disconnected_registered = false;
+static bool event_ap_sta_connected_registered = false;
+static bool event_ap_sta_disconnected_registered = false;
 
 SemaphoreHandle_t nvs_mutex;
 
@@ -70,6 +74,8 @@ bool wifi_connected = false;
 //identificadores de handlers de eventos IP y WIFI:
 esp_event_handler_instance_t instance_sta_disconnected;
 esp_event_handler_instance_t instance_got_ip;
+esp_event_handler_instance_t instance_ap_sta_connected;
+esp_event_handler_instance_t instance_ap_sta_disconnected;
 
 //estado de creación de interfaces STA y AP
 static esp_netif_t *sta_netif = NULL;
@@ -724,6 +730,22 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
         }
         wifi_connected = true;
     }
+    else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STACONNECTED) {
+        wifi_event_ap_staconnected_t *event = (wifi_event_ap_staconnected_t *)event_data;
+        ESP_LOGI("event_handler", "Cliente conectado al AP, MAC: " MACSTR, MAC2STR(event->mac));
+        // Cambia el LED a un color (por ejemplo, verde claro) para indicar que hay al menos un cliente conectado
+        set_led_color(COLOR_AQUAMARINE); //
+    }
+    else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STADISCONNECTED) {
+        wifi_event_ap_stadisconnected_t *event = (wifi_event_ap_stadisconnected_t *)event_data;
+        ESP_LOGI("event_handler", "Cliente desconectado del AP, MAC: " MACSTR, MAC2STR(event->mac));
+        // Si ya no hay clientes conectados, restablece el LED al color predeterminado para el AP (por ejemplo, cian)
+        wifi_sta_list_t sta_list;
+        esp_wifi_ap_get_sta_list(&sta_list);
+        if (sta_list.num == 0) {
+            set_led_color(COLOR_CYAN);
+        }
+    }
 }
 
 /**
@@ -846,6 +868,34 @@ void start_IP_events(void){
         ESP_LOGI("start_IP_events", "Eventos IP iniciados");
     }
     
+}
+
+void start_AP_sta_connected_event(void) {
+    if (!event_ap_sta_connected_registered) {
+        ESP_LOGI("start_AP_sta_connected_event", "Registrando evento WIFI_EVENT_AP_STACONNECTED...");
+        ESP_ERROR_CHECK(esp_event_handler_instance_register(
+            WIFI_EVENT,
+            WIFI_EVENT_AP_STACONNECTED,
+            &event_handler,
+            NULL,
+            &instance_ap_sta_connected
+        ));
+        event_ap_sta_connected_registered = true;
+    }
+}
+
+void start_AP_sta_disconnected_event(void) {
+    if (!event_ap_sta_disconnected_registered) {
+        ESP_LOGI("start_AP_sta_disconnected_event", "Registrando evento WIFI_EVENT_AP_STADISCONNECTED...");
+        ESP_ERROR_CHECK(esp_event_handler_instance_register(
+            WIFI_EVENT,
+            WIFI_EVENT_AP_STADISCONNECTED,
+            &event_handler,
+            NULL,
+            &instance_ap_sta_disconnected
+        ));
+        event_ap_sta_disconnected_registered = true;
+    }
 }
 
 /**
@@ -1467,6 +1517,9 @@ void wifi_set_AP_STA(void) {
     //Se comprueba el estado del Wi-Fi y se imprime en monitor serie
     esp_wifi_get_mode(&current_mode);
     ESP_LOGI("wifi_set_AP_STA", "Modo Wi-Fi actual: %d", current_mode);
+
+    start_AP_sta_connected_event();
+    start_AP_sta_disconnected_event();
     
     /**
      * Se enciende el LED RGB en color Cyan indicando que el portal cautivo
@@ -2020,8 +2073,8 @@ esp_err_t submit_handler(httpd_req_t *req) {
             ESP_LOGI("submit_handler", "PASSWORD Decodificado: %s", password);
 
             // **Enviar respuesta indicando que se intentará conectar**
-            httpd_resp_set_type(req, "text/plain");
-            httpd_resp_send(req, "Intentando conectar a la red Wi-Fi...", strlen("Intentando conectar a la red Wi-Fi..."));
+            //httpd_resp_set_type(req, "text/plain");
+            //httpd_resp_send(req, "Intentando conectar a la red Wi-Fi...", strlen("Intentando conectar a la red Wi-Fi..."));
 
             // **Ahora iniciamos la conexión después de enviar la respuesta**
             vTaskDelay(pdMS_TO_TICKS(1000));  // Pequeña espera para evitar interferencias
@@ -2030,23 +2083,25 @@ esp_err_t submit_handler(httpd_req_t *req) {
             esp_err_t connection_state = wifi_connect_STA(ssid, password);
             if (connection_state == ESP_OK) {
                 ESP_LOGI("submit_handler", "Conexión establecida correctamente.");
-                
+                httpd_resp_sendstr(req, "OK");
+
                 //int stop_signal = 1;
                 //xQueueSend(stop_server_queue, &stop_signal, portMAX_DELAY);
-                //vTaskDelay(pdMS_TO_TICKS(500));
                 if(stop_STA_DISCONNECTED_event()==ESP_OK){
                     ESP_LOGI("submit_handler", "Eventos wifi detenidos correctamente");
                 }else
                 {
                     ESP_LOGE("submit_handler","Error: no se pudo detener los eventos WIFI");
                 }
-
+                
                 if(stop_IP_events()==ESP_OK){
                     ESP_LOGI("submit_handler", "Eventos ip detenidos correctamente");
                 }else
                 {
                     ESP_LOGE("submit_handler","Error: no se pudo detener los eventos IP");
                 }
+                vTaskDelay(pdMS_TO_TICKS(1000));
+
                 
                 wifi_set_STA();
                 start_STA_DISCONNECTED_event();
@@ -2054,9 +2109,8 @@ esp_err_t submit_handler(httpd_req_t *req) {
 
                 save_wifi_config_to_nvs(WIFI_MODE_STA, ssid, password);
                 ESP_ERROR_CHECK(esp_wifi_connect());
-                wifi_mode_t mode_test = read_wifi_config_from_nvs(ssid, sizeof(ssid), password, sizeof(password));
-                ESP_LOGI("submit_handler", "Credenciales en NVS: mode = %d, SSID = %s, PASSWORD = %s", mode_test, ssid, password);
-
+                //wifi_mode_t mode_test = read_wifi_config_from_nvs(ssid, sizeof(ssid), password, sizeof(password));
+                //ESP_LOGI("submit_handler", "Credenciales en NVS: mode = %d, SSID = %s, PASSWORD = %s", mode_test, ssid, password);
                 //se habilita el ahorro de bateria
                 ESP_LOGI("submit_handler", "Habilitando ahorro de energía Wi-Fi...");
                 ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MIN_MODEM));
@@ -2064,6 +2118,7 @@ esp_err_t submit_handler(httpd_req_t *req) {
             } 
             else {
                 ESP_LOGE("submit_handler", "Error desconocido al conectarse. verifique que las credenciales sean correctas y que la red este activa");
+                httpd_resp_sendstr(req, "verifique que el dispositivo esta cerca del router y que las credenciales sean correctas.");
                 for (size_t i = 0; i < 3; i++)
                 {
                     set_led_color(COLOR_MAGENTA);
@@ -2072,13 +2127,6 @@ esp_err_t submit_handler(httpd_req_t *req) {
                     vTaskDelay(pdMS_TO_TICKS(500));
                 }
                 set_led_color(COLOR_CYAN);
-                const char redirect_html[] = "<html><head>"
-                             "<meta http-equiv='refresh' content='0; url=/' />"
-                             "<script>window.location.href='/';</script>"
-                             "</head></html>";
-                httpd_resp_set_type(req, "text/html");
-                httpd_resp_send(req, redirect_html, strlen(redirect_html));
-
             }
 
             return ESP_OK;

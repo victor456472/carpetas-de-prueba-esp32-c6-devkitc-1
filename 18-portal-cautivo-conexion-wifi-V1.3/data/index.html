@@ -8,18 +8,19 @@
 </head>
 <body>
     <h1>Conecte la ESP32 a una red Wi-Fi:</h1>
-    <form action="/submit" method="GET">
-
+    <form>
       <label for="SSID">Red:</label>
       <select id="SSID" name="SSID" required>
         <option value="">Cargando redes...</option>
       </select><br>
       
-      <label for="PASSWORD">contraseña:</label>
+      <label for="PASSWORD">Contraseña:</label>
       <input type="password" id="PASSWORD" name="PASSWORD" required><br>
       
       <input type="submit" value="Enviar">
-      
     </form>
+
+    <!-- Elemento para mostrar los mensajes de retroalimentación -->
+    <div id="estadoConexion" style="margin-top: 20px; font-weight: bold;"></div>
 </body>
 </html>
