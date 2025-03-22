@@ -18,7 +18,7 @@
 #include "esp_wifi_types.h"
 #include "lwip/sockets.h"
 #include "esp_mac.h"
-
+#include "mqtt_client.h"
 
 #define AP_SSID "RED ESP32 VICTOR"
 #define AP_PASSWORD "12345678"
@@ -50,6 +50,9 @@
 #define ADC_CHANNEL ADC_CHANNEL_5
 #define ADC_ATTENUATION ADC_ATTEN_DB_6
 #define ADC_BITWIDTH ADC_BITWIDTH_12
+
+#define MQTT_BROKER_HOST "192.168.51.97"  // Cambia a la IP de tu PC si Mosquitto está corriendo localmente
+#define MQTT_BROKER_PORT 1883
 
 static bool events_ip_registered = false;
 static bool event_sta_disconnected_registered = false;
@@ -96,6 +99,8 @@ httpd_config_t config = HTTPD_DEFAULT_CONFIG();
  * HTTP, que se usará para registrar rutas y controladores.
  */
 httpd_handle_t server = NULL;
+
+static esp_mqtt_client_handle_t client = NULL;
 
 esp_err_t root_handler(httpd_req_t *req);
 esp_err_t submit_handler(httpd_req_t *req);
@@ -637,6 +642,8 @@ void init_spiffs(void) {
     }
 }
 
+static void mqtt_app_start(void);
+
 /**
  * @brief Este es un manejador de eventos llamado event_handler que se encarga de 
  * procesar eventos relacionados con Wi-Fi e IP. Este tipo de función es fundamental
@@ -721,7 +728,7 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
         }else{
             if(mode == WIFI_MODE_STA){
                 //enciende la lectura del ADC
-                ESP_ERROR_CHECK(start_timer_adc());
+                mqtt_app_start();
                 /**
                  * Se establece el led RGB de color verde para indicar que la conexion fue exitosa
                  */
@@ -1738,34 +1745,17 @@ void reset_handler(void *param) {
  * 
  * @return nada.
  */
-void vTimerCallback(TimerHandle_t pxTimer)
+void vTimerCallback(TimerHandle_t pxTimer) 
 {
-    // inicializa adc_val en 0 antes de realizar la lectura
     adc_val = 0;
-
-    /**
-     * Se lee el valor del canal ADC especificado.
-     * 
-     * @param[in] adc_handle manejador de la unidad ADC (inicializado en set_adc()).
-     * @param[in] ADC_CHANNEL canal ADC especifico donde esta conectado el sensor
-     * @param[out] adc_val direccion de memoria donde se almacenará el resultado.
-     * 
-     * @return Devuelve un código de error (esp_err_t ret), indicando si la lectura 
-     * fue exitosa (ESP_OK) o falló.
-     */
     esp_err_t ret = adc_oneshot_read(adc_handle, ADC_CHANNEL, &adc_val);
     
-    /**
-     * Se verifica si la lectura fue exitosa. para ello se emplea la variable ret
-     * la cual toma el valor de ESP_OK en caso positivo.
-     * 
-     * Si la operacion es exitosa se imprime la lectura del sensor en el monitor
-     * serie. Por lo contrario si la lectura falla se imprime el mensaje de error
-     * en el monitor serie
-     */
     if (ret == ESP_OK)
     {
-        ESP_LOGI("vTimerCallback", "Lectura del sensor: %d", adc_val);
+        char payload[32];
+        snprintf(payload, sizeof(payload), "%d", adc_val);  // Convierte el entero a cadena
+        int msg_id = esp_mqtt_client_publish(client, "sensores/gas", payload, 0, 1, 0);
+        ESP_LOGI("vTimerCallback", "Mensaje enviado (ID=%d): %s", msg_id, payload);
     }
     else
     {
@@ -2009,6 +1999,34 @@ esp_err_t root_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
+static void mqtt_event_handler_cb(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data) {
+    esp_mqtt_event_handle_t event = event_data;
+
+    switch (event->event_id) {
+        case MQTT_EVENT_CONNECTED:
+            ESP_LOGI("mqtt_event_handler_cb", "Conectado al broker MQTT");
+            ESP_ERROR_CHECK(start_timer_adc());
+            break;
+        default:
+            ESP_LOGI("mqtt_event_handler_cb", "Evento MQTT recibido: %d", event->event_id);
+            break;
+    }
+}
+
+static void mqtt_app_start(void) {
+    esp_mqtt_client_config_t mqtt_cfg = {
+        .broker.address.hostname = MQTT_BROKER_HOST,
+        .broker.address.port = MQTT_BROKER_PORT,
+        .broker.address.transport = MQTT_TRANSPORT_OVER_TCP,
+        .credentials.username = "sensor1",
+        .credentials.authentication.password = "prueba1234"
+    };
+
+    client = esp_mqtt_client_init(&mqtt_cfg);
+    esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler_cb, NULL);
+    esp_mqtt_client_start(client);
+}
+
 /**
  * @brief Este es un manejador HTTP que procesa una solicitud enviada desde un formulario
  * web al servidor alojado en la ESP32. Su proposito principale es extraer las credenciales
@@ -2109,8 +2127,7 @@ esp_err_t submit_handler(httpd_req_t *req) {
 
                 save_wifi_config_to_nvs(WIFI_MODE_STA, ssid, password);
                 ESP_ERROR_CHECK(esp_wifi_connect());
-                //wifi_mode_t mode_test = read_wifi_config_from_nvs(ssid, sizeof(ssid), password, sizeof(password));
-                //ESP_LOGI("submit_handler", "Credenciales en NVS: mode = %d, SSID = %s, PASSWORD = %s", mode_test, ssid, password);
+
                 //se habilita el ahorro de bateria
                 ESP_LOGI("submit_handler", "Habilitando ahorro de energía Wi-Fi...");
                 ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MIN_MODEM));
